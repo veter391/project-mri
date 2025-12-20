@@ -1,0 +1,53 @@
+version: "3.9"
+
+# Local development stack.
+# Production: change api keys, mount /data as a persistent volume, add TLS.
+
+x-api-keys: &api-keys
+  MRI_API_KEYS: "${MRI_API_KEYS:-devkey-change-me}"
+x-allowed-roots: &allowed-roots
+  MRI_ALLOWED_ROOTS: "${MRI_ALLOWED_ROOTS:-/repos}"
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: project-mri:latest
+    container_name: project-mri-api
+    restart: unless-stopped
+    ports:
+      - "7331:7331"
+    environment:
+      <<: *api-keys
+      <<: *allowed-roots
+      MRI_CORS_ORIGINS: "${MRI_CORS_ORIGINS:-}"
+      MRI_LOG_FORMAT: "json"
+      MRI_LOG_LEVEL: "INFO"
+      MRI_DB: "/data/mri.db"
+      MRI_RATE_LIMIT: "${MRI_RATE_LIMIT:-60}"
+      MRI_SCAN_RATE_LIMIT: "${MRI_SCAN_RATE_LIMIT:-5}"
+      MRI_MAX_REQUEST_BYTES: "${MRI_MAX_REQUEST_BYTES:-1048576}"
+    volumes:
+      - mri-data:/data
+      # Mount your repos as read-only mounts here:
+      # - /home/me/projects:/repos:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:7331/api/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    # Drop all capabilities, run as non-root
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    read_only: false  # /data needs write
+    security_opt:
+      - no-new-privileges:true
+    user: "1000:1000"
+
+volumes:
+  mri-data:
+    driver: local

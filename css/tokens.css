@@ -1,0 +1,56 @@
+/* ============================================================
+   PROJECT MRI — Design Tokens
+   Terminal aesthetic. Warm amber. Mono everywhere.
+   ============================================================ */
+:root {
+  /* Surfaces (ink layers, deep → raised) */
+  --ink-void:   #06080C;
+  --ink-deep:   #0A0D14;
+  --ink-raised: #0F131B;
+  --ink-card:   #131820;
+  --ink-input:  #1A1F2A;
+
+  /* Lines */
+  --line:        #1E2330;
+  --line-2:      #2A3140;
+  --line-3:      #3A4252;
+  --line-amber:  rgba(244, 168, 71, 0.30);
+  --line-amber-hi: rgba(244, 168, 71, 0.55);
+
+  /* Text */
+  --text-primary:   #F5F2EA;
+  --text-secondary: #B8B0A0;
+  --text-mute:      #7B7468;
+  --text-dim:       #4A463E;
+
+  /* Accent (warm amber — единственный chromatic accent) */
+  --accent:         #F4A847;
+  --accent-deep:    #C9753D;
+  --accent-pale:    #FFD9A8;
+  --accent-soft:    rgba(244, 168, 71, 0.10);
+  --accent-glow:    rgba(244, 168, 71, 0.32);
+
+  /* Status (used sparingly, only for state) */
+  --ok:     #7FB069;
+  --warn:   #E2B45C;
+  --alert:  #D9604E;
+  --info:   #6FA8C7; /* never as accent — only for state badges */
+
+  /* Type */
+  --font-mono:    'JetBrains Mono', ui-monospace, 'Courier New', monospace;
+  --font-display: 'JetBrains Mono', ui-monospace, monospace;
+  --font-body:    'JetBrains Mono', ui-monospace, monospace;
+
+  /* Layout */
+  --container:    1240px;
+  --container-narrow: 920px;
+  --nav-h:        56px;
+  --status-h:     28px;
+
+  /* Motion */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+
+  /* CRT scanline intensity */
+  --scan-strength: 0.018;
+}

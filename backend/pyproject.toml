@@ -1,0 +1,129 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "project-mri"
+version = "0.3.0"
+description = "MRI scan for your codebase — local-first codebase intelligence tool"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "project-mri contributors" }]
+keywords = ["code-analysis", "code-quality", "developer-tools", "git-history", "architecture"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Environment :: Web Environment",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Quality Assurance",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+# Hard deps (runtime)
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "pydantic>=2.6",
+    "aiosqlite>=0.19",
+    "gitpython>=3.1",
+    "click>=8.1",
+    "httpx>=0.27",
+    "tree-sitter<0.21",  # pinned: 0.21+ breaks tree_sitter_languages API
+    "tree-sitter-languages>=1.10",
+    "jinja2>=3.1",
+    "websockets>=12.0",
+    "pyyaml>=6.0",
+    "bcrypt>=4.1",
+    "pyjwt>=2.8",
+    "python-multipart>=0.0.9",
+    "watchdog>=4.0",
+    "prometheus-client>=0.20",
+    "alembic>=1.13",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.5",
+    "mypy>=1.10",
+    "bandit>=1.7",
+    "pip-audit>=2.7",
+]
+
+[project.scripts]
+mri = "mri.cli:cli"
+mri-server = "mri.cli:cli"
+
+[project.urls]
+Homepage = "https://github.com/project-mri/project-mri"
+Documentation = "https://github.com/project-mri/project-mri/blob/main/README.md"
+Repository = "https://github.com/project-mri/project-mri.git"
+Issues = "https://github.com/project-mri/project-mri/issues"
+Changelog = "https://github.com/project-mri/project-mri/blob/main/CHANGELOG.md"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["mri*"]
+exclude = ["tests*"]
+
+[tool.setuptools.package-data]
+mri = ["db/*.sql", "templates/*.html", "templates/*.j2"]
+
+# Include the self-hosted dashboard in the wheel
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.data-files]
+"mri/dashboard" = [
+    "../../dashboard/index.html",
+    "../../dashboard/css/*.css",
+    "../../dashboard/dist/*.js",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "ASYNC", "S"]
+ignore = [
+    "S101",  # Use of assert detected (we use assert in tests)
+    "S104",  # Possible binding to all interfaces (dev only)
+    "S105",  # Possible hardcoded password (we have env-based config)
+    "S107",  # Hardcoded password (same)
+    "E501",  # Line too long (we use ruff format too)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S"]
+"*/migrations/*" = ["B008"]
+# These are intentional defensive patterns used across the codebase
+"mri/api/routes/*.py" = ["B008", "S110"]  # FastAPI Depends() in defaults; webhook/swallow is non-fatal
+"mri/auth/routes.py" = ["B008"]  # FastAPI Depends() in defaults
+"mri/services/*.py" = ["B007"]  # unused loop vars in (src, dst) iterations
+"mri/services/repo_cloner.py" = ["S603"]  # subprocess with validated fixed args
+"mri/services/demo_feed.py" = ["S311"]  # deterministic seeding for demo, not crypto
+"mri/cli.py" = ["S202", "ASYNC240"]  # tarfile validated above; Path methods in async CLI helpers
+"mri/services/scanner.py" = ["ASYNC240", "S110"]  # Path methods in async scan; intentional try/except
+"mri/analyzers/*.py" = ["S110", "S112"]  # intentional try/except pass/continue for parse robustness
+"mri/analyzers/coupling.py" = ["B007"]  # (src, dst) iteration pattern
+"mri/security.py" = ["B904"]  # raise-from is not needed in low-level security catch
+"mri/api/routes/demo.py" = ["B904"]  # demo endpoints, raise-from not needed
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+disallow_untyped_defs = false
+warn_unused_ignores = true
