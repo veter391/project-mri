@@ -1,0 +1,52 @@
+# project-mri GitLab CI/CD template
+# Include in your .gitlab-ci.yml:
+#
+#   include:
+#     - remote: 'https://raw.githubusercontent.com/project-mri/project-mri/main/ci/gitlab-ci.yml'
+
+stages:
+  - analyze
+
+variables:
+  MRI_OUTPUT_DIR: "mri-reports"
+
+project-mri:analyze:
+  stage: analyze
+  image: python:3.11
+  before_script:
+    - pip install --upgrade pip
+    - pip install project-mri
+  script:
+    - mkdir -p $MRI_OUTPUT_DIR
+    - mri scan . --output $MRI_OUTPUT_DIR/mri-report.html --json-out $MRI_OUTPUT_DIR/mri-report.json
+    # Convert JSON to Code Quality format for GitLab merge requests
+    - |
+      python -c "
+      import json
+      with open('$MRI_OUTPUT_DIR/mri-report.json') as f:
+          r = json.load(f)
+      sev_to_severity = {'info': 'info', 'low': 'minor', 'medium': 'major', 'high': 'critical', 'critical': 'blocker'}
+      issues = []
+      for f in r.get('findings', []):
+          issues.append({
+              'description': f.get('description') or f['title'],
+              'check_name': f['category'],
+              'fingerprint': f.get('analyzer_name', '') + ':' + f['category'] + ':' + f['title'],
+              'severity': sev_to_severity.get(f['severity'], 'major'),
+              'location': {'path': f.get('target_path', '.'), 'lines': {'begin': 1}},
+          })
+      with open('$MRI_OUTPUT_DIR/code-quality.json', 'w') as f:
+          json.dump(issues, f, indent=2)
+      print(f'Code Quality: {len(issues)} issues')
+      "
+  artifacts:
+    when: always
+    paths:
+      - $MRI_OUTPUT_DIR
+    reports:
+      codequality: $MRI_OUTPUT_DIR/code-quality.json
+    expire_in: 30 days
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'

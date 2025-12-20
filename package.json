@@ -1,0 +1,22 @@
+{
+  "name": "project-mri-site",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Multi-page website for Project MRI - local-first codebase intelligence tool",
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc --watch",
+    "serve": "python3 -m http.server 8080",
+    "validate": "playwright install chromium 2>/dev/null; python3 ../.scripts/validate_site.py 8080",
+    "go-server": "cd server && go run main.go"
+  },
+  "keywords": [
+    "open-source",
+    "code-analysis",
+    "git-history",
+    "developer-tools"
+  ],
+  "author": "Project MRI Contributors",
+  "license": "MIT"
+}
