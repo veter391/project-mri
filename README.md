@@ -217,7 +217,7 @@ Every score explains itself in the dashboard.
 | `GET  /metrics` | Prometheus format |
 | `GET  /dashboard/` | Self-hosted dashboard |
 
-Full reference: [API.md](./API.md)
+Full reference: [API.md](./docs/API.md)
 
 ---
 
@@ -263,7 +263,7 @@ sensible defaults:
 - **HMAC-SHA256 webhook signing**
 - **Tarfile path-traversal protection** in `mri restore`
 
-For production deployments, see [INTEGRATIONS.md → expose publicly](./INTEGRATIONS.md#reverse-proxy--public-access).
+For production deployments, see [INTEGRATIONS.md → expose publicly](./docs/INTEGRATIONS.md#reverse-proxy--public-access).
 
 ---
 

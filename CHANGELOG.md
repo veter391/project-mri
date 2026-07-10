@@ -78,7 +78,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Python-version detection (3.10+)
 - `.github/action/action.yml` — official GitHub Action for CI
 - `ci/gitlab-ci.yml` — GitLab CI template with Code Quality output
-- Comprehensive [INSTALL.md](./INSTALL.md), [DASHBOARD.md](./DASHBOARD.md), [API.md](./API.md), [INTEGRATIONS.md](./INTEGRATIONS.md), [CONFIG.md](./CONFIG.md)
+- Comprehensive [INSTALL.md](./docs/INSTALL.md), [DASHBOARD.md](./docs/DASHBOARD.md), [API.md](./docs/API.md), [INTEGRATIONS.md](./docs/INTEGRATIONS.md), [CONFIG.md](./docs/CONFIG.md)
 
 ### Changed
 - Tree-sitter pinned to `<0.21` in both requirements.txt and pyproject.toml
