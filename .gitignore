@@ -8,6 +8,10 @@
 _archive/
 # planning & spec docs, local reference only:
 preparation-documents/
+# internal working area: plans, research, draft docs, reference catalogs:
+_workspace/
+# project-local Claude config, memory, rules (never publish):
+.claude/
 *.bak
 *.orig
 *.tmp
