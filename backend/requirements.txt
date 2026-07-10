@@ -46,4 +46,4 @@ prometheus-client>=0.20,<1.0
 
 # --- Dev / Test ---
 pytest>=9.0,<10.0
-pytest-asyncio>=0.23,<0.30
+pytest-asyncio>=0.23,<1.5
