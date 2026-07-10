@@ -56,8 +56,10 @@ export function getCurrentRoute(): string {
 
 function navHTML(currentRoute: string): string {
   const links = NAV_LINKS.map((l) => {
-    const active = l.route === currentRoute ? ' is-active' : '';
-    return `<a href="${l.route}" class="nav-link${active}" data-spa-link>${l.label}</a>`;
+    const isActive = l.route === currentRoute;
+    const active = isActive ? ' is-active' : '';
+    const current = isActive ? ' aria-current="page"' : '';
+    return `<a href="${l.route}" class="nav-link${active}"${current} data-spa-link>${l.label}</a>`;
   }).join('');
 
   return `
@@ -72,8 +74,8 @@ function navHTML(currentRoute: string): string {
           </svg>
           project-mri
         </a>
-        <div class="nav__links">${links}</div>
-        <button class="nav__burger" type="button" aria-label="Toggle menu" aria-expanded="false" aria-controls="nav-links">
+        <div class="nav__links" id="nav-links">${links}</div>
+        <button class="nav__burger" type="button" aria-label="Toggle navigation menu" aria-expanded="false" aria-controls="nav-links">
           <span></span>
         </button>
         <div class="nav__meta">
@@ -142,24 +144,69 @@ function formatTime(): string {
   return `${hh}:${mm}:${ss}`;
 }
 
-/**
- * SPA navigation: intercept internal link clicks, fetch the .html,
- * swap <main> content, update history + active nav state.
- */
-function installSpaNavigation(): void {
-  document.addEventListener('click', (e: MouseEvent) => {
-    const target = (e.target as HTMLElement).closest('a[data-spa-link]');
-    if (!target) return;
+/** Visually-hidden live region so screen readers hear route changes. */
+function ensureLiveRegion(): HTMLElement {
+  let region = document.getElementById('mri-live-region');
+  if (!region) {
+    region = document.createElement('div');
+    region.id = 'mri-live-region';
+    region.className = 'sr-only';
+    region.setAttribute('aria-live', 'polite');
+    region.setAttribute('aria-atomic', 'true');
+    document.body.appendChild(region);
+  }
+  return region;
+}
 
+function announce(message: string): void {
+  ensureLiveRegion().textContent = message;
+}
+
+/** Mobile navigation menu open/close (the burger). */
+function setMobileMenu(open: boolean): void {
+  const links = document.getElementById('nav-links');
+  const burger = document.querySelector<HTMLButtonElement>('.nav__burger');
+  if (links) links.classList.toggle('is-open', open);
+  if (burger) burger.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+
+/**
+ * SPA navigation + chrome interactions. Installed exactly once (guarded)
+ * via event delegation, so it survives nav re-renders after each swap and
+ * never accumulates duplicate document listeners.
+ */
+let interactionsInstalled = false;
+function installSpaNavigation(): void {
+  if (interactionsInstalled) return;
+  interactionsInstalled = true;
+
+  document.addEventListener('click', (e: MouseEvent) => {
+    const el = e.target as HTMLElement;
+
+    // Burger toggle
+    const burger = el.closest('.nav__burger');
+    if (burger) {
+      const isOpen = burger.getAttribute('aria-expanded') === 'true';
+      setMobileMenu(!isOpen);
+      return;
+    }
+
+    // Internal SPA link
+    const target = el.closest('a[data-spa-link]');
+    if (!target) return;
     const anchor = target as HTMLAnchorElement;
     const href = anchor.getAttribute('href') || '';
-    // Only handle internal routes (start with /)
-    if (!href.startsWith('/')) return;
-    // Skip external & mailto & anchor-only
+    if (!href.startsWith('/')) return; // internal routes only
     if (anchor.target === '_blank' || href.startsWith('mailto:')) return;
 
     e.preventDefault();
+    setMobileMenu(false); // close the menu when navigating
     navigateTo(href);
+  });
+
+  // Escape closes the mobile menu.
+  document.addEventListener('keydown', (e: KeyboardEvent) => {
+    if (e.key === 'Escape') setMobileMenu(false);
   });
 
   // Handle browser back/forward
@@ -212,8 +259,15 @@ async function navigateTo(href: string, pushState = true): Promise<void> {
     // Update document title
     document.title = doc.title;
 
-    // Update <body class="theme-..."> if any (preserve)
-    // (no theme switching here, kept simple)
+    // Accessibility: move keyboard focus into the freshly-swapped content and
+    // announce the new page, so keyboard and screen-reader users are not left
+    // stranded on the stale link with no feedback.
+    const focusMain = document.querySelector<HTMLElement>('main');
+    if (focusMain) {
+      focusMain.setAttribute('tabindex', '-1');
+      focusMain.focus();
+    }
+    announce(doc.title);
 
     // Re-mount any page-specific JS (terminal animations, demos, etc.)
     remountPageFeatures();
@@ -248,8 +302,10 @@ function updateNavActive(route: string): void {
     const href = a.getAttribute('href');
     if (href === route) {
       a.classList.add('is-active');
+      a.setAttribute('aria-current', 'page');
     } else {
       a.classList.remove('is-active');
+      a.removeAttribute('aria-current');
     }
   });
 }

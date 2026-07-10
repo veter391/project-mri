@@ -345,12 +345,45 @@ img, svg { display: block; max-width: 100%; }
   .nav__meta { display: none; }
 }
 @media (max-width: 720px) {
+  .nav { position: relative; }
   .nav__links { display: none; }
   .nav__burger { display: inline-flex; }
+  /* Burger-opened dropdown */
+  .nav__links.is-open {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    position: absolute;
+    top: var(--nav-h);
+    left: 0;
+    right: 0;
+    background: var(--ink-raised);
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line-2);
+    padding: 6px 0;
+    z-index: 900;
+  }
+  .nav__links.is-open a {
+    padding: 12px 22px;
+    border-left: none;
+    border-bottom: 1px solid var(--line);
+  }
 }
 /* ============================================================
-   A11Y — skip-to-content link
+   A11Y — visually-hidden helper + skip-to-content link
    ============================================================ */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
 .skip-link {
   position: absolute;
   left: -9999px;

@@ -20,8 +20,8 @@
   /* Text */
   --text-primary:   #F5F2EA;
   --text-secondary: #B8B0A0;
-  --text-mute:      #7B7468;
-  --text-dim:       #4A463E;
+  --text-mute:      #948B7C; /* WCAG AA (>=4.5:1) on ink surfaces for small text */
+  --text-dim:       #6B6458; /* dim/decorative only — never small body text */
 
   /* Accent (warm amber — единственный chromatic accent) */
   --accent:         #F4A847;
