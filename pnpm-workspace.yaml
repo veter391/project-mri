@@ -1,0 +1,7 @@
+packages:
+  - 'apps/*'
+  - 'packages/*'
+
+# sharp (Next.js image optimization) needs its install script; approve it.
+allowBuilds:
+  sharp: true

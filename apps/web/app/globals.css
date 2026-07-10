@@ -1,0 +1,70 @@
+@import "tailwindcss";
+
+/* ── Design tokens — terminal aesthetic, warm amber, mono everywhere ── */
+@theme {
+  --color-void: #06080c;
+  --color-deep: #0a0d14;
+  --color-raised: #0f131b;
+  --color-card: #131820;
+  --color-line: #1e2330;
+  --color-line-2: #2a3140;
+  --color-ink: #f5f2ea;
+  --color-secondary: #b8b0a0;
+  --color-mute: #948b7c;
+  --color-accent: #f4a847;
+  --color-accent-deep: #c9753d;
+  --color-accent-pale: #ffd9a8;
+  --color-ok: #7fb069;
+  --color-warn: #e2b45c;
+  --color-alert: #d9604e;
+
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, "Courier New", monospace;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  background: var(--color-void);
+  color: var(--color-ink);
+  font-family: var(--font-mono);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Subtle CRT scanline overlay — GPU-cheap, the signature terminal look */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 100;
+  background: repeating-linear-gradient(
+    0deg,
+    rgba(244, 168, 71, 0.014) 0px,
+    rgba(244, 168, 71, 0.014) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+*:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

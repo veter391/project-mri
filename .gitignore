@@ -175,3 +175,9 @@ ehthumbs.db
 Thumbs.db
 Desktop.ini
 $RECYCLE.BIN/
+
+# ── Next.js / monorepo apps ──
+apps/*/.next/
+apps/*/out/
+apps/**/next-env.d.ts
+.next/
