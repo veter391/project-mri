@@ -39,7 +39,7 @@ pyjwt>=2.8,<3.0
 python-multipart>=0.0.9,<1.0  # required for OAuth2PasswordRequestForm
 
 # File system watcher (for `mri watch`)
-watchdog>=4.0,<6.0
+watchdog>=4.0,<7.0
 
 # Metrics
 prometheus-client>=0.20,<1.0
