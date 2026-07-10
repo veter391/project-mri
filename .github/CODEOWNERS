@@ -13,7 +13,7 @@
 #     to document structure and ease future delegation) ---
 
 # Python analysis backend
-/backend/               @veter391
+/src/                   @veter391
 
 # Terminal dashboard (TypeScript)
 /dashboard/             @veter391

@@ -21,8 +21,8 @@ COPY requirements.txt ./
 RUN sed -i 's/tree-sitter.*/tree-sitter<0.21/' requirements.txt || true
 RUN pip install --prefix=/install -r requirements.txt
 
-# Copy source
-COPY mri ./mri
+# Copy source (src-layout)
+COPY src ./src
 COPY pyproject.toml README.md ./
 
 # Install the package itself
@@ -76,5 +76,5 @@ CMD ["mri", "serve", "--host", "0.0.0.0", "--port", "7331"]
 # Labels
 LABEL org.opencontainers.image.title="project-mri" \
       org.opencontainers.image.description="MRI scan for your codebase" \
-      org.opencontainers.image.source="https://github.com/project-mri/project-mri" \
+      org.opencontainers.image.source="https://github.com/veter391/project-mri" \
       org.opencontainers.image.licenses="MIT"

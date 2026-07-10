@@ -62,30 +62,27 @@ mri = "mri.cli:cli"
 mri-server = "mri.cli:cli"
 
 [project.urls]
-Homepage = "https://github.com/project-mri/project-mri"
-Documentation = "https://github.com/project-mri/project-mri/blob/main/README.md"
-Repository = "https://github.com/project-mri/project-mri.git"
-Issues = "https://github.com/project-mri/project-mri/issues"
-Changelog = "https://github.com/project-mri/project-mri/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/veter391/project-mri"
+Documentation = "https://github.com/veter391/project-mri/blob/main/README.md"
+Repository = "https://github.com/veter391/project-mri.git"
+Issues = "https://github.com/veter391/project-mri/issues"
+Changelog = "https://github.com/veter391/project-mri/blob/main/CHANGELOG.md"
 
+# --- src-layout: the importable package lives under src/mri ---
 [tool.setuptools.packages.find]
-where = ["."]
+where = ["src"]
 include = ["mri*"]
 exclude = ["tests*"]
 
 [tool.setuptools.package-data]
 mri = ["db/*.sql", "templates/*.html", "templates/*.j2"]
 
-# Include the self-hosted dashboard in the wheel
 [tool.setuptools]
 include-package-data = true
 
-[tool.setuptools.data-files]
-"mri/dashboard" = [
-    "../../dashboard/index.html",
-    "../../dashboard/css/*.css",
-    "../../dashboard/dist/*.js",
-]
+# NOTE: the self-hosted dashboard is embedded into the wheel in a later phase
+# (apps/dashboard Next `output: 'export'` → src/mri/_frontend, via hatch artifacts).
+# In development it is served from the working tree; see src/mri/api for the mount.
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -94,6 +91,7 @@ asyncio_mode = "auto"
 [tool.ruff]
 line-length = 100
 target-version = "py310"
+src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "ASYNC", "S"]
@@ -109,17 +107,17 @@ ignore = [
 "tests/*" = ["S"]
 "*/migrations/*" = ["B008"]
 # These are intentional defensive patterns used across the codebase
-"mri/api/routes/*.py" = ["B008", "S110"]  # FastAPI Depends() in defaults; webhook/swallow is non-fatal
-"mri/auth/routes.py" = ["B008"]  # FastAPI Depends() in defaults
-"mri/services/*.py" = ["B007"]  # unused loop vars in (src, dst) iterations
-"mri/services/repo_cloner.py" = ["S603"]  # subprocess with validated fixed args
-"mri/services/demo_feed.py" = ["S311"]  # deterministic seeding for demo, not crypto
-"mri/cli.py" = ["S202", "ASYNC240"]  # tarfile validated above; Path methods in async CLI helpers
-"mri/services/scanner.py" = ["ASYNC240", "S110"]  # Path methods in async scan; intentional try/except
-"mri/analyzers/*.py" = ["S110", "S112"]  # intentional try/except pass/continue for parse robustness
-"mri/analyzers/coupling.py" = ["B007"]  # (src, dst) iteration pattern
-"mri/security.py" = ["B904"]  # raise-from is not needed in low-level security catch
-"mri/api/routes/demo.py" = ["B904"]  # demo endpoints, raise-from not needed
+"src/mri/api/routes/*.py" = ["B008", "S110"]  # FastAPI Depends() in defaults; webhook/swallow is non-fatal
+"src/mri/auth/routes.py" = ["B008"]  # FastAPI Depends() in defaults
+"src/mri/services/*.py" = ["B007"]  # unused loop vars in (src, dst) iterations
+"src/mri/services/repo_cloner.py" = ["S603"]  # subprocess with validated fixed args
+"src/mri/services/demo_feed.py" = ["S311"]  # deterministic seeding for demo, not crypto
+"src/mri/cli.py" = ["S202", "ASYNC240"]  # tarfile validated above; Path methods in async CLI helpers
+"src/mri/services/scanner.py" = ["ASYNC240", "S110"]  # Path methods in async scan; intentional try/except
+"src/mri/analyzers/*.py" = ["S110", "S112"]  # intentional try/except pass/continue for parse robustness
+"src/mri/analyzers/coupling.py" = ["B007"]  # (src, dst) iteration pattern
+"src/mri/security.py" = ["B904"]  # raise-from is not needed in low-level security catch
+"src/mri/api/routes/demo.py" = ["B904"]  # demo endpoints, raise-from not needed
 
 [tool.mypy]
 python_version = "3.10"

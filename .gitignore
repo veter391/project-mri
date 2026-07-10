@@ -87,7 +87,7 @@ dmypy.json
 *.db-wal
 *.db-shm
 data/*.db
-backend/**/*.db
+src/**/*.db
 
 # ─────────────────────────────────────────────────────────────
 # Node / TypeScript

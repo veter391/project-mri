@@ -154,7 +154,7 @@ def create_app() -> FastAPI:
     from pathlib import Path as _Path
 
     from fastapi.staticfiles import StaticFiles as _StaticFiles
-    # /api/app.py -> /mri -> /backend -> /project-mri (where dashboard/ lives)
+    # /api/app.py -> /mri -> /src -> /project-mri (where dashboard/ lives)
     _dashboard_dir = _Path(__file__).parent.parent.parent.parent / "dashboard"
     if (_dashboard_dir / "index.html").exists():
         # Serve the compiled JS bundle
