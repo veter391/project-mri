@@ -158,12 +158,20 @@ class ComplexityAnalyzer(BaseAnalyzer):
                 pen = min(25.0, len(long_functions) * 2)
                 score -= pen
                 contributors.append(f"{len(long_functions)} functions > {LONG_FN_LINES} lines (-{pen:.1f})")
-            comment_ratio = comment_lines_total / max(code_lines_total, 1)
-            if comment_ratio < 0.05:
-                score -= 10
-                contributors.append(f"low comment ratio ({round(comment_ratio * 100, 1)}%) (-10.0)")
+            # Comment ratio is only meaningful when we actually counted code
+            # lines. Without tree-sitter no lines are scanned, so a 0/0 -> 0
+            # ratio must NOT trigger a spurious penalty on every project.
+            comment_ratio = (
+                comment_lines_total / code_lines_total if code_lines_total > 0 else 0.0
+            )
+            if code_lines_total > 0:
+                if comment_ratio < 0.05:
+                    score -= 10
+                    contributors.append(
+                        f"low comment ratio ({round(comment_ratio * 100, 1)}%) (-10.0)"
+                    )
             else:
-                contributors.append(f"comment ratio = {round(comment_ratio * 100, 1)}%")
+                contributors.append("comment ratio not measured (no line scan)")
 
             self._set_score(max(0.0, score), contributors)
             self.run.signals = {

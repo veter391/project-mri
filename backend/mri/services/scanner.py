@@ -178,22 +178,29 @@ class Scanner:
                 analyzer._finish_err(f"unhandled: {type(exc).__name__}: {exc}")
             return analyzer.run
 
-        # Run all analyzers concurrently with gather — fail-soft via return_exceptions
-        runs = await asyncio.gather(
-            *[run_one(Cls, i) for i, Cls in enumerate(self.ANALYZERS)],
-            return_exceptions=False,
-        )
+        # Run all analyzers concurrently with gather — fail-soft via return_exceptions.
+        # ACTIVE_SCANS is incremented here and decremented in finally so the gauge
+        # is correct on every entry path (API + CLI) and never leaks on error.
+        from mri import metrics as _metrics
+        _metrics.ACTIVE_SCANS.inc()
+        try:
+            runs = await asyncio.gather(
+                *[run_one(Cls, i) for i, Cls in enumerate(self.ANALYZERS)],
+                return_exceptions=False,
+            )
 
-        # Compose report
-        await self._emit("compose", "scoring", 92)
-        report = self._compose_report(
-            path=path,
-            files=files,
-            git=git,
-            branch=branch,
-            started=started,
-            runs=runs,
-        )
+            # Compose report
+            await self._emit("compose", "scoring", 92)
+            report = self._compose_report(
+                path=path,
+                files=files,
+                git=git,
+                branch=branch,
+                started=started,
+                runs=runs,
+            )
+        finally:
+            _metrics.ACTIVE_SCANS.dec()
         # If this scan came from a URL, optionally clean up the cached clone
         if clone_cleanup_path is not None and opts.cleanup_clone:
             from mri.services.repo_cloner import cleanup_clone
@@ -283,7 +290,8 @@ class Scanner:
         runs: list,
     ) -> Report:
         from mri import metrics as _metrics
-        _metrics.ACTIVE_SCANS.dec()
+        # ACTIVE_SCANS gauge is managed symmetrically in scan() (inc/finally-dec),
+        # so it is not touched here — _compose_report stays free of that side effect.
         if runs:
             elapsed = (datetime.now(timezone.utc) - started).total_seconds()
             _metrics.SCAN_DURATION.observe(elapsed)

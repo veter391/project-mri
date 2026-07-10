@@ -1,0 +1,31 @@
+# CODEOWNERS for MRI
+#
+# These owners are the default reviewers for everything in this repository.
+# When a pull request is opened, the listed owners are automatically
+# requested for review. Matching is last-match-wins, most specific last.
+#
+# Docs: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owner for the entire repository.
+*                       @veter391
+
+# --- Component owners (currently all the sole maintainer; kept explicit
+#     to document structure and ease future delegation) ---
+
+# Python analysis backend
+/backend/               @veter391
+
+# Terminal dashboard (TypeScript)
+/dashboard/             @veter391
+
+# Marketing / static site (root-level ts/, css/, *.html)
+/ts/                    @veter391
+/css/                   @veter391
+
+# Governance, security, and CI must always be reviewed by the maintainer.
+/.github/               @veter391
+/CODE_OF_CONDUCT.md     @veter391
+/CONTRIBUTING.md        @veter391
+/GOVERNANCE.md          @veter391
+/SECURITY.md            @veter391
+/LICENSE                @veter391

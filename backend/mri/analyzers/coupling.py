@@ -66,14 +66,18 @@ class CouplingAnalyzer(BaseAnalyzer):
                 rel = f.get("rel_path", "")
                 mod = self._module_of(rel)
                 stem = Path(rel).stem
-                # Note: parenthesise the OR — Python's `and`/`or` precedence
-                # would otherwise bind `or` to the whole expression, breaking
-                # the intent. The check is: (uppercase name) OR (abstract prefix)
-                if (stem and stem[0].isupper()) or stem.startswith(
-                    ("interface", "abs_", "base_", "abstract_")
-                ):
-                    abstract_count[mod] += 1
-                if stem.endswith((".h",)) or stem.startswith(("I", "Abstract", "Base")):
+                name = Path(rel).name  # keep extension for header (.h) detection
+                # Abstractness heuristic: does the filename suggest an abstract
+                # type / interface? Decide ONCE per file so abstract_count can
+                # never exceed type_count — otherwise abstractness A could exceed
+                # its documented [0, 1] range and skew the distance metric.
+                is_abstract = (
+                    (bool(stem) and stem[0].isupper())
+                    or stem.startswith(("interface", "abs_", "base_", "abstract_"))
+                    or stem.startswith(("I", "Abstract", "Base"))
+                    or name.endswith(".h")
+                )
+                if is_abstract:
                     abstract_count[mod] += 1
                 if not rel.endswith(("test.py", "_test.go", ".test.ts", "Test.java", ".spec.ts")):
                     type_count[mod] += 1
@@ -84,7 +88,7 @@ class CouplingAnalyzer(BaseAnalyzer):
                 efferent = ce.get(m, 0)
                 instability = efferent / max(afferent + efferent, 1)
                 total = type_count[m]
-                abstractness = abstract_count[m] / max(total, 1) if total else 0
+                abstractness = min(1.0, abstract_count[m] / max(total, 1)) if total else 0
                 distance = ((abstractness + instability - 1) ** 2) ** 0.5 / (2 ** 0.5)
                 metrics.append({
                     "module": m,
