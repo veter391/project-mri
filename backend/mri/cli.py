@@ -235,6 +235,12 @@ def serve(host: str | None, port: int | None, reload: bool) -> None:
         host = cfg.get("server", {}).get("host", "127.0.0.1")
     if port is None:
         port = cfg.get("server", {}).get("port", 7331)
+    # Fail closed: never expose an unauthenticated server on a public interface.
+    from mri.security import assert_safe_bind
+    try:
+        assert_safe_bind(host)
+    except RuntimeError as exc:
+        raise SystemExit(f"error: {exc}")
     click.echo(f"→ starting project-mri at http://{host}:{port}", err=True)
     click.echo(f"  API:        http://{host}:{port}/api/docs", err=True)
     click.echo(f"  Dashboard:  http://{host}:{port}/dashboard/", err=True)

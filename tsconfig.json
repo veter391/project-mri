@@ -21,6 +21,6 @@
     "sourceMap": true,
     "removeComments": false
   },
-  "include": ["ts/**/*.ts", "dashboard/ts/**/*.ts"],
+  "include": ["ts/**/*.ts"],
   "exclude": ["node_modules", "dist", "dashboard/dist"]
 }

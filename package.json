@@ -5,11 +5,12 @@
   "type": "module",
   "description": "Multi-page website for Project MRI - local-first codebase intelligence tool",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && tsc -p tsconfig.dashboard.json",
+    "build:site": "tsc",
+    "build:dashboard": "tsc -p tsconfig.dashboard.json",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.dashboard.json --noEmit",
     "watch": "tsc --watch",
-    "serve": "python3 -m http.server 8080",
-    "validate": "playwright install chromium 2>/dev/null; python3 ../.scripts/validate_site.py 8080",
-    "go-server": "cd server && go run main.go"
+    "serve": "python3 -m http.server 8080"
   },
   "keywords": [
     "open-source",
@@ -18,5 +19,8 @@
     "developer-tools"
   ],
   "author": "Project MRI Contributors",
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "typescript": "5.9.2"
+  }
 }

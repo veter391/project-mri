@@ -44,9 +44,6 @@ watchdog>=4.0,<6.0
 # Metrics
 prometheus-client>=0.20,<1.0
 
-# DB migrations
-alembic>=1.13,<2.0
-
 # --- Dev / Test ---
 pytest>=9.0,<10.0
 pytest-asyncio>=0.23,<0.30

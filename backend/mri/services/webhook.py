@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import datetime, timezone
 import logging
 from pathlib import Path
 from typing import Any
@@ -132,8 +133,14 @@ class _delivery_record:
                         json.dumps(self.payload, default=str),
                         self.status_code,
                         (self.response_body or "")[:1000],
-                        # delivered_at = now if we got a response, NULL if not
-                        "datetime('now')" if self.status_code is not None and self.status_code > 0 else None,
+                        # delivered_at = now (ISO-8601) if we got a response, else NULL.
+                        # Must be a real value: a bound "datetime('now')" string would be
+                        # stored verbatim as text, never evaluated by SQLite.
+                        (
+                            datetime.now(timezone.utc).isoformat()
+                            if self.status_code is not None and self.status_code > 0
+                            else None
+                        ),
                     ),
                 )
                 return int(cur.lastrowid or 0)

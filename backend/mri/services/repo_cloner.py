@@ -13,19 +13,28 @@ prevents path collisions and makes it easy to identify a clone by its URL.
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import logging
 import os
 import re
 import shutil
+import socket
+import sqlite3
 import subprocess  # nosec B404
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
 from mri.config import get_config
-from mri.db.repository import get_connection
+from mri.db.repository import default_db_path
 
 logger = logging.getLogger("mri.cloner")
+
+# Hosts we allow cloning from by default. Extend via `clones.allowed_hosts`
+# in config, or the configured self-hosted GitLab URL. This is the primary
+# guard against SSRF / cloning from arbitrary or internal endpoints.
+_DEFAULT_ALLOWED_HOSTS = ("github.com", "gitlab.com", "bitbucket.org")
 
 
 # ---------------------------------------------------------------------------
@@ -172,21 +181,100 @@ def is_cached(url: str) -> bool:
     return path.exists() and (path / ".git").exists()
 
 
-def _update_clone_record(url: str, local_path: Path) -> None:
-    """Update the cloned_repos table to mark this URL as recently scanned."""
-    with get_connection() as conn:
-        # INSERT OR IGNORE then UPDATE scan_count
+def _record_clone(url: str, local_path: Path, default_branch: str | None = None) -> None:
+    """Upsert the cloned_repos row using a synchronous sqlite3 connection.
+
+    clone_repo runs inside ``asyncio.to_thread`` (no event loop in this worker
+    thread), so the async ``get_connection`` context manager cannot be used
+    here. We open a short-lived sync sqlite3 connection instead, mirroring the
+    pattern in ``services/webhook.py``. The schema is applied idempotently so
+    the row persists even on the CLI ``mri scan <url>`` path.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    db_path = default_db_path()
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    schema_sql = (Path(__file__).parent.parent / "db" / "schema.sql").read_text(encoding="utf-8")
+    conn = sqlite3.connect(str(db_path), isolation_level=None)
+    try:
+        conn.executescript(schema_sql)
+        conn.execute("PRAGMA foreign_keys = ON")
         conn.execute(
             """
-            INSERT INTO cloned_repos (url, local_path)
-            VALUES (?, ?)
+            INSERT INTO cloned_repos (url, local_path, default_branch, last_scanned_at, scan_count)
+            VALUES (?, ?, ?, ?, 1)
             ON CONFLICT(url) DO UPDATE SET
-                last_scanned_at = datetime('now'),
-                scan_count = scan_count + 1
+                local_path = excluded.local_path,
+                default_branch = COALESCE(excluded.default_branch, cloned_repos.default_branch),
+                last_scanned_at = excluded.last_scanned_at,
+                scan_count = cloned_repos.scan_count + 1
             """,
-            (url, str(local_path)),
+            (url, str(local_path), default_branch, now),
         )
-        conn.commit()
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Clone-target validation (allowlist + SSRF guard)
+# ---------------------------------------------------------------------------
+
+
+def _allowed_hosts(config: dict) -> set[str]:
+    hosts = {h.lower() for h in _DEFAULT_ALLOWED_HOSTS}
+    clones = config.get("clones", {}) or {}
+    for h in clones.get("allowed_hosts", []) or []:
+        hosts.add(str(h).strip().lower())
+    # A configured self-hosted GitLab counts as allowed.
+    gitlab = (config.get("integrations", {}) or {}).get("gitlab", {}) or {}
+    gl_url = gitlab.get("url")
+    if gl_url:
+        netloc = urlparse(gl_url).netloc.lower().split("@")[-1].split(":")[0]
+        if netloc:
+            hosts.add(netloc)
+    return hosts
+
+
+def _resolves_to_internal(hostname: str) -> bool:
+    """True if the host resolves to (or is) a private/loopback/link-local/reserved IP.
+
+    Defense-in-depth against SSRF and DNS-rebinding to internal endpoints such
+    as the cloud metadata service (169.254.169.254).
+    """
+    try:
+        infos = socket.getaddrinfo(hostname, None)
+    except OSError:
+        return True  # cannot resolve -> refuse
+    for info in infos:
+        try:
+            ip = ipaddress.ip_address(info[4][0])
+        except ValueError:
+            continue
+        if (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_reserved
+            or ip.is_multicast
+            or ip.is_unspecified
+        ):
+            return True
+    return False
+
+
+def _validate_clone_target(repo: RepoUrl, config: dict) -> None:
+    """Reject clone targets that are not allow-listed or resolve internally."""
+    hostname = repo.host.split("@")[-1].split(":")[0].lower()
+    allowed = _allowed_hosts(config)
+    if hostname not in allowed:
+        raise CloneError(
+            f"host '{hostname}' is not permitted for cloning. "
+            f"Allowed: {sorted(allowed)}. Add it under clones.allowed_hosts to permit it."
+        )
+    if _resolves_to_internal(hostname):
+        raise CloneError(
+            f"refusing to clone from '{hostname}': it resolves to a private, "
+            "loopback, or link-local address."
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -221,6 +309,7 @@ def clone_repo(
     """
     config = get_config()
     repo = parse_repo_url(url)
+    _validate_clone_target(repo, config)
     cache_dir = _default_cache_dir()
     cache_dir.mkdir(parents=True, exist_ok=True)
     local_path = _url_to_cache_path(url, cache_dir)
@@ -233,7 +322,7 @@ def clone_repo(
                 _run_git("fetch", "--depth", str(depth or 1), "origin", branch, cwd=local_path)
             else:
                 _run_git("fetch", "--depth", str(depth or 1), "origin", cwd=local_path)
-            _update_clone_record(url, local_path)
+            _record_clone(url, local_path)
             logger.info(
                 "clone.updated",
                 extra={"event": "clone.updated", "url": url, "path": str(local_path)},
@@ -287,21 +376,8 @@ def clone_repo(
         except CloneError:
             branch = "main"
 
-    # Update DB record
-    with get_connection() as conn:
-        conn.execute(
-            """
-            INSERT INTO cloned_repos (url, local_path, default_branch, scan_count)
-            VALUES (?, ?, ?, 1)
-            ON CONFLICT(url) DO UPDATE SET
-                local_path = excluded.local_path,
-                default_branch = excluded.default_branch,
-                last_scanned_at = datetime('now'),
-                scan_count = scan_count + 1
-            """,
-            (url, str(local_path), branch),
-        )
-        conn.commit()
+    # Update DB record (sync sqlite3 — see _record_clone docstring)
+    _record_clone(url, local_path, branch)
 
     logger.info(
         "clone.done",
@@ -338,6 +414,14 @@ def cleanup_clone(url: str) -> None:
 def _run_git(*args: Any, cwd: Path | str | None = None, timeout: int = 60) -> str:
     """Run a git command, return stdout. Raise CloneError on non-zero exit."""
     cmd = ["git", *args]
+    # Never let git block on an interactive credential/host prompt: a private
+    # URL with no configured token must fail fast instead of hanging a worker.
+    env = {
+        **os.environ,
+        "GIT_TERMINAL_PROMPT": "0",
+        "GIT_ASKPASS": "",
+        "GCM_INTERACTIVE": "never",
+    }
     try:
         result = subprocess.run(  # nosec B603  # fixed args, no shell, URL-validated
             cmd,
@@ -346,6 +430,7 @@ def _run_git(*args: Any, cwd: Path | str | None = None, timeout: int = 60) -> st
             text=True,
             timeout=timeout,
             check=False,
+            env=env,
         )
     except subprocess.TimeoutExpired as e:
         raise CloneError(f"git command timed out after {timeout}s: {' '.join(cmd[:3])}…") from e

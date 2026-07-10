@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import ipaddress
 import os
 import re
 import secrets
@@ -135,7 +136,58 @@ def _is_under(path: Path, root: Path) -> bool:
 
 
 def is_auth_enabled() -> bool:
-    return bool(get_api_keys())
+    """Auth is enforced when API keys are configured OR a dashboard user exists.
+
+    Checking only API keys (the previous behavior) meant an operator who ran
+    `mri init` and relied on JWT login — but did not set MRI_API_KEYS — got a
+    server that let every request through unauthenticated (critical when the
+    server is reverse-proxied on loopback). A configured user must gate the API.
+    """
+    if get_api_keys():
+        return True
+    try:
+        from mri.auth.users import count_users
+        return count_users() > 0
+    except Exception:
+        # DB not initialised yet (pre-`mri init`) -> no user-based auth.
+        return False
+
+
+# Explicit, knowing override for running unauthenticated on a non-loopback
+# interface (e.g. behind a trusted VPN/proxy that terminates auth).
+ALLOW_INSECURE_ENV = "MRI_ALLOW_INSECURE"
+
+
+def is_loopback_host(host: str) -> bool:
+    """True if `host` is a loopback address / localhost."""
+    h = (host or "").strip().lower()
+    if h in ("localhost", ""):
+        return True
+    try:
+        return ipaddress.ip_address(h).is_loopback
+    except ValueError:
+        return False
+
+
+def assert_safe_bind(host: str, *, has_user_auth: bool = False) -> None:
+    """Fail closed: refuse to serve on a non-loopback interface without auth.
+
+    MRI is local-first; binding to 0.0.0.0 or a public IP without any
+    authentication would expose scan/clone/delete endpoints to the network.
+    Raises RuntimeError unless auth is configured (API keys or a dashboard
+    user), the bind host is loopback, or the operator sets MRI_ALLOW_INSECURE=1.
+    """
+    if is_loopback_host(host):
+        return
+    if is_auth_enabled() or has_user_auth:
+        return
+    if os.environ.get(ALLOW_INSECURE_ENV, "").strip() in ("1", "true", "yes"):
+        return
+    raise RuntimeError(
+        f"Refusing to bind to non-loopback host '{host}' without authentication. "
+        f"Set {API_KEYS_ENV} (or create a dashboard user with `mri init`), bind to "
+        f"127.0.0.1, or set {ALLOW_INSECURE_ENV}=1 if this host is on a trusted network."
+    )
 
 
 def check_api_key(provided: str | None) -> bool:

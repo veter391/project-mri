@@ -45,7 +45,6 @@ dependencies = [
     "python-multipart>=0.0.9",
     "watchdog>=4.0",
     "prometheus-client>=0.20",
-    "alembic>=1.13",
 ]
 
 [project.optional-dependencies]

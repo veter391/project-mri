@@ -67,11 +67,11 @@ EXPOSE 7331
 # tini handles signal forwarding for graceful shutdown
 ENTRYPOINT ["/usr/bin/tini", "--"]
 
-# Default: run API server. Override with `cli` command for other subcommands.
-CMD ["python", "-m", "uvicorn", "mri.api.app:app", \
-     "--host", "0.0.0.0", "--port", "7331", \
-     "--workers", "1", \
-     "--proxy-headers", "--forwarded-allow-ips", "*"]
+# Default: run the API server + dashboard through the guarded CLI entrypoint.
+# `mri serve` fail-closes on a public bind without auth (set MRI_API_KEYS, or
+# MRI_ALLOW_INSECURE=1 on a trusted network). Proxy-header trust is intentionally
+# NOT enabled by default; configure it explicitly when behind a known proxy.
+CMD ["mri", "serve", "--host", "0.0.0.0", "--port", "7331"]
 
 # Labels
 LABEL org.opencontainers.image.title="project-mri" \

@@ -1,0 +1,29 @@
+cff-version: 1.2.0
+message: "If you use MRI in your work, please cite it using the metadata below."
+title: "MRI: local-first, explainable, agent-native codebase intelligence"
+type: software
+authors:
+  - name: "veter391"
+    # Replace with your real given/family names when ready, e.g.:
+    #   family-names: "Surname"
+    #   given-names: "Name"
+    #   orcid: "https://orcid.org/0000-0000-0000-0000"
+abstract: >-
+  MRI is a local-first, MIT-licensed, fully open-source codebase-intelligence
+  tool. It analyzes a codebase and produces explainable, agent-native insights,
+  exposed through a Python backend and a vanilla-TypeScript terminal dashboard.
+keywords:
+  - codebase-intelligence
+  - static-analysis
+  - developer-tools
+  - local-first
+  - explainable
+  - agent-native
+  - open-source
+license: MIT
+repository-code: "https://github.com/veter391/mri"
+url: "https://github.com/veter391/mri"
+# Uncomment and fill in on each tagged release:
+# version: "0.1.0"
+# date-released: "2026-01-01"
+# doi: "10.5281/zenodo.XXXXXXX"   # add if you mint a Zenodo DOI

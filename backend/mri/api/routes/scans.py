@@ -202,7 +202,8 @@ async def start_scan(
     # Metrics
     from mri import metrics as _metrics
     _metrics.SCANS_STARTED.labels(source="url" if is_url else "local").inc(1)
-    _metrics.ACTIVE_SCANS.inc()
+    # ACTIVE_SCANS is incremented/decremented inside Scanner.scan (symmetric,
+    # correct on both API and CLI paths) — do not touch the gauge here.
 
     # Kick off background scan
     task = asyncio.create_task(

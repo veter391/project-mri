@@ -4,11 +4,12 @@
     "module": "ES2020",
     "moduleResolution": "node",
     "lib": ["DOM", "ES2020"],
-    "outDir": "./dist",
-    "rootDir": "./ts",
+    "outDir": "dashboard/dist",
+    "rootDir": "dashboard/ts",
     "strict": false,
     "skipLibCheck": true,
-    "esModuleInterop": true
+    "esModuleInterop": true,
+    "sourceMap": true
   },
-  "include": ["ts/**/*.ts"]
+  "include": ["dashboard/ts/**/*.ts"]
 }

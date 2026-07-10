@@ -80,8 +80,20 @@ class GitHistoryAnalyzer(BaseAnalyzer):
                     if ctx.is_excluded(path_str):
                         continue
                     fstats = stats.files[path_str]
-                    churn = (fstats.get("lines", 0) if isinstance(fstats, dict) else getattr(fstats, "lines", 0)) \
-                        + (fstats.get("deletions", 0) if isinstance(fstats, dict) else getattr(fstats, "deletions", 0))
+                    # churn = insertions + deletions. GitPython's per-file `lines`
+                    # already equals insertions + deletions, so we sum the two
+                    # components explicitly to avoid double-counting deletions.
+                    insertions = (
+                        fstats.get("insertions", 0)
+                        if isinstance(fstats, dict)
+                        else getattr(fstats, "insertions", 0)
+                    )
+                    deletions = (
+                        fstats.get("deletions", 0)
+                        if isinstance(fstats, dict)
+                        else getattr(fstats, "deletions", 0)
+                    )
+                    churn = insertions + deletions
                     file_churn[path_str] += churn
                     file_commits[path_str] += 1
                     file_authors[path_str].add(author)
