@@ -19,19 +19,6 @@ const ANALYZERS = [
 export default function Home() {
   return (
     <main className="mx-auto max-w-5xl px-6">
-      {/* status bar */}
-      <div className="flex items-center justify-between border-b border-line py-3 text-[11px] text-mute">
-        <div className="flex items-center gap-4">
-          <span className="text-ok">● local-first</span>
-          <span>offline-ready</span>
-          <span className="text-warn">MIT</span>
-        </div>
-        <a href={GITHUB} className="hover:text-accent">
-          github ↗
-        </a>
-      </div>
-
-      {/* hero */}
       <section className="py-24 sm:py-32">
         <p className="mb-5 text-xs tracking-widest text-accent">
           // codebase intelligence · built for the AI coding era
@@ -59,7 +46,6 @@ export default function Home() {
         </div>
       </section>
 
-      {/* manifesto */}
       <section className="border-t border-line py-16">
         <h2 className="mb-8 text-xs tracking-widest text-mute">/// principles</h2>
         <div className="grid gap-px overflow-hidden rounded-sm border border-line bg-line sm:grid-cols-2">
@@ -73,7 +59,6 @@ export default function Home() {
         </div>
       </section>
 
-      {/* analyzers */}
       <section className="border-t border-line py-16">
         <h2 className="mb-2 text-xs tracking-widest text-mute">/// six analyzers</h2>
         <p className="mb-8 max-w-2xl text-sm text-secondary">
@@ -92,12 +77,6 @@ export default function Home() {
           ))}
         </div>
       </section>
-
-      {/* footer */}
-      <footer className="flex flex-col gap-2 border-t border-line py-8 text-[11px] text-mute sm:flex-row sm:items-center sm:justify-between">
-        <span>project-mri · facts over magic scores</span>
-        <span>MIT · your code never leaves your machine</span>
-      </footer>
     </main>
   );
 }
