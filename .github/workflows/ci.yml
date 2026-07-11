@@ -78,25 +78,21 @@ jobs:
   # Frontend smoke test (current root site; migrates to apps/web in a later phase)
   # -----------------------------------------------------------------------
   test-frontend:
-    name: Frontend smoke test
+    name: Frontend build (apps/web + dashboard)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-          cache: npm
-          cache-dependency-path: package.json
+          cache: pnpm
       - name: Install
-        run: npm ci || npm install
-      - name: TypeScript build
-        run: npx tsc --noEmit && npx tsc -p tsconfig.dashboard.json --noEmit
-      - name: HTML validation (basic)
-        run: |
-          for f in *.html; do
-            echo "Checking $f..."
-            test -f "$f" || (echo "Missing $f" && exit 1)
-          done
+        run: pnpm install --frozen-lockfile
+      - name: Build web (Next.js)
+        run: pnpm --filter @mri/web build
+      - name: Build dashboard (legacy tsc — migrates to Next in a later phase)
+        run: pnpm run build:dashboard-legacy
 
   # -----------------------------------------------------------------------
   # Docker build + smoke

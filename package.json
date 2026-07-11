@@ -1,24 +1,15 @@
 {
-  "name": "project-mri-site",
-  "version": "0.1.0",
+  "name": "project-mri-workspace",
+  "version": "0.0.0",
   "private": true,
-  "type": "module",
-  "description": "Multi-page website for Project MRI - local-first codebase intelligence tool",
+  "description": "Monorepo workspace for project-mri — Next.js apps (web, dashboard) alongside the Python package in src/",
+  "packageManager": "pnpm@11.1.2",
   "scripts": {
-    "build": "tsc && tsc -p tsconfig.dashboard.json",
-    "build:site": "tsc",
-    "build:dashboard": "tsc -p tsconfig.dashboard.json",
-    "typecheck": "tsc --noEmit && tsc -p tsconfig.dashboard.json --noEmit",
-    "watch": "tsc --watch",
-    "serve": "python3 -m http.server 8080"
+    "dev:web": "pnpm --filter @mri/web dev",
+    "build:web": "pnpm --filter @mri/web build",
+    "build:dashboard-legacy": "tsc -p tsconfig.dashboard.json",
+    "typecheck": "pnpm -r --if-present typecheck"
   },
-  "keywords": [
-    "open-source",
-    "code-analysis",
-    "git-history",
-    "developer-tools"
-  ],
-  "author": "Project MRI Contributors",
   "license": "MIT",
   "devDependencies": {
     "typescript": "5.9.2"
