@@ -75,10 +75,10 @@ jobs:
           fail_ci_if_error: false
 
   # -----------------------------------------------------------------------
-  # Frontend smoke test (current root site; migrates to apps/web in a later phase)
+  # Frontend build — Next.js apps (marketing site + self-hosted dashboard)
   # -----------------------------------------------------------------------
   test-frontend:
-    name: Frontend build (apps/web + dashboard)
+    name: Frontend build (apps/web + apps/dashboard)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -91,8 +91,8 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Build web (Next.js)
         run: pnpm --filter @mri/web build
-      - name: Build dashboard (legacy tsc — migrates to Next in a later phase)
-        run: pnpm run build:dashboard-legacy
+      - name: Build dashboard (Next.js static export + embed)
+        run: pnpm --filter @mri/dashboard build
 
   # -----------------------------------------------------------------------
   # Docker build + smoke

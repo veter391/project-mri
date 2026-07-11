@@ -148,36 +148,42 @@ def create_app() -> FastAPI:
     app.include_router(auth_router)
     app.include_router(metrics_router)
 
-    # ---- Self-hosted dashboard static files ----
-    # The dashboard ships with the package and is served at /dashboard/.
-    # It is a vanilla TS SPA — index.html + dist/dashboard.js + css/.
-    from pathlib import Path as _Path
+    # ---- Self-hosted dashboard (static Next export, embedded in the package) ----
+    # Built by apps/dashboard (Next `output: 'export'`, basePath /dashboard) and
+    # copied into mri/_frontend/dashboard. Located via importlib.resources so it
+    # resolves correctly from source AND from an installed wheel (the previous
+    # __file__-relative walk broke once installed into site-packages).
+    from importlib.resources import files as _pkg_files
 
     from fastapi.staticfiles import StaticFiles as _StaticFiles
-    # /api/app.py -> /mri -> /src -> /project-mri (where dashboard/ lives)
-    _dashboard_dir = _Path(__file__).parent.parent.parent.parent / "dashboard"
-    if (_dashboard_dir / "index.html").exists():
-        # Serve the compiled JS bundle
-        _dist_dir = _dashboard_dir / "dist"
-        if _dist_dir.exists():
-            app.mount(
-                "/dashboard/dist",
-                _StaticFiles(directory=str(_dist_dir)),
-                name="dashboard-dist",
-            )
-        # Serve the CSS
-        _css_dir = _dashboard_dir / "css"
-        if _css_dir.exists():
-            app.mount(
-                "/dashboard/css",
-                _StaticFiles(directory=str(_css_dir)),
-                name="dashboard-css",
-            )
+    from starlette.exceptions import HTTPException as _HTTPException
 
-        @app.get("/dashboard", response_class=HTMLResponse, include_in_schema=False)
-        @app.get("/dashboard/", response_class=HTMLResponse, include_in_schema=False)
-        async def dashboard_index() -> str:
-            return (_dashboard_dir / "index.html").read_text(encoding="utf-8")
+    try:
+        _dashboard_dir = _pkg_files("mri").joinpath("_frontend", "dashboard")
+        _has_dashboard = _dashboard_dir.joinpath("index.html").is_file()
+    except (ModuleNotFoundError, FileNotFoundError, NotADirectoryError):
+        _has_dashboard = False
+
+    if _has_dashboard:
+        class _SPAStaticFiles(_StaticFiles):
+            """StaticFiles with SPA fallback: unknown routes serve index.html,
+            missing assets (js/css/images) still 404."""
+
+            async def get_response(self, path: str, scope):  # type: ignore[override]
+                try:
+                    return await super().get_response(path, scope)
+                except _HTTPException as exc:
+                    if exc.status_code == 404:
+                        return await super().get_response("index.html", scope)
+                    raise
+
+        # The Next export self-references /dashboard/_next/..., which this mount
+        # serves. Mounted after the /api routers so the API always wins.
+        app.mount(
+            "/dashboard",
+            _SPAStaticFiles(directory=str(_dashboard_dir), html=True),
+            name="dashboard",
+        )
 
     @app.get("/", response_class=HTMLResponse, include_in_schema=False)
     async def root() -> str:

@@ -75,14 +75,14 @@ include = ["mri*"]
 exclude = ["tests*"]
 
 [tool.setuptools.package-data]
-mri = ["db/*.sql", "templates/*.html", "templates/*.j2"]
+# The self-hosted dashboard is a static Next export (apps/dashboard,
+# `output: 'export'`) copied into src/mri/_frontend/dashboard at build time.
+# It is gitignored but lives inside the `mri` package, so this recursive glob
+# ships it in the wheel. `mri serve` then serves it with no Node runtime.
+mri = ["db/*.sql", "templates/*.html", "templates/*.j2", "_frontend/**/*"]
 
 [tool.setuptools]
 include-package-data = true
-
-# NOTE: the self-hosted dashboard is embedded into the wheel in a later phase
-# (apps/dashboard Next `output: 'export'` → src/mri/_frontend, via hatch artifacts).
-# In development it is served from the working tree; see src/mri/api for the mount.
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

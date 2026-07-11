@@ -6,8 +6,9 @@
   "packageManager": "pnpm@11.1.2",
   "scripts": {
     "dev:web": "pnpm --filter @mri/web dev",
+    "dev:dashboard": "pnpm --filter @mri/dashboard dev",
     "build:web": "pnpm --filter @mri/web build",
-    "build:dashboard-legacy": "tsc -p tsconfig.dashboard.json",
+    "build:dashboard": "pnpm --filter @mri/dashboard build",
     "typecheck": "pnpm -r --if-present typecheck"
   },
   "license": "MIT",
