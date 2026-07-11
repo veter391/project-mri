@@ -21,7 +21,7 @@ from typing import Any
 from mri.analyzers.base import BaseAnalyzer, ScanContext
 
 try:
-    from tree_sitter_languages import get_parser  # type: ignore
+    from tree_sitter_language_pack import get_parser  # type: ignore
     _HAS_TS = True
 except Exception:  # pragma: no cover
     _HAS_TS = False
@@ -184,7 +184,9 @@ class ComplexityAnalyzer(BaseAnalyzer):
                 "long_files": long_files,
                 "long_functions": long_functions[:20],
                 "per_language": dict(per_lang),
-                "comment_ratio": round(comment_ratio, 4),
+                # null (not 0) when no code lines were scanned — a 0.0 here would
+                # falsely read as "documented nothing" rather than "not measured".
+                "comment_ratio": round(comment_ratio, 4) if code_lines_total > 0 else None,
             }
             self._finish_ok()
         except Exception as exc:  # pragma: no cover

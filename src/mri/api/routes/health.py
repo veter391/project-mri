@@ -85,7 +85,7 @@ async def health_deep(response: Response) -> dict:
 
     # 3. Tree-sitter available
     try:
-        from tree_sitter_languages import get_parser
+        from tree_sitter_language_pack import get_parser
         get_parser("python")  # warm
         checks["tree_sitter"] = {"ok": True}
     except Exception as e:

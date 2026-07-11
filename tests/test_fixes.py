@@ -86,8 +86,8 @@ def test_find_cycles_no_recursion_error_on_deep_chain():
 
 def test_ts_walk_handles_deeply_nested_ast():
     """The old recursive _ts_walk hit recursion limit on deep JSX/TSX."""
-    import tree_sitter_languages
-    parser = tree_sitter_languages.get_parser("python")
+    import tree_sitter_language_pack
+    parser = tree_sitter_language_pack.get_parser("python")
     a = DependenciesAnalyzer()
     # 5,000 levels of nested parens — parser creates a deep AST
     code = "x = " + "(" * 5000 + "1" + ")" * 5000
@@ -196,6 +196,19 @@ async def test_complexity_excludes_comments_from_code(tmp: Path):
     # comment_ratio should be ~0.5 (50 of 100 lines are comments)
     ratio = a.run.signals["comment_ratio"]
     assert 0.4 < ratio < 0.6, f"comment_ratio={ratio} — comments not being excluded"
+
+
+async def test_comment_ratio_is_null_when_parser_absent(tmp: Path, monkeypatch):
+    """Without a tree-sitter parser no lines are scanned; comment_ratio must be
+    null — a 0.0 would falsely read as 'documented nothing' rather than
+    'not measured'."""
+    import mri.analyzers.complexity as cx
+
+    monkeypatch.setattr(cx, "_HAS_TS", False)
+    ctx = _make_ctx(tmp, {"a.py": "\n".join(["# c"] * 10 + ["x = 1"] * 10)})
+    a = cx.ComplexityAnalyzer()
+    await a.analyze(ctx)
+    assert a.run.signals["comment_ratio"] is None
 
 
 # ---------------------------------------------------------------------------

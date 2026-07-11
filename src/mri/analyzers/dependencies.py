@@ -18,7 +18,7 @@ from mri.analyzers.base import BaseAnalyzer, ScanContext
 
 # Try tree-sitter gracefully — fall back to regex for unsupported langs
 try:
-    from tree_sitter_languages import get_parser  # type: ignore
+    from tree_sitter_language_pack import get_parser  # type: ignore
     _HAS_TS = True
 except Exception:  # pragma: no cover
     _HAS_TS = False
