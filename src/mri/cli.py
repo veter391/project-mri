@@ -240,7 +240,7 @@ def serve(host: str | None, port: int | None, reload: bool) -> None:
     try:
         assert_safe_bind(host)
     except RuntimeError as exc:
-        raise SystemExit(f"error: {exc}")
+        raise SystemExit(f"error: {exc}") from exc
     click.echo(f"→ starting project-mri at http://{host}:{port}", err=True)
     click.echo(f"  API:        http://{host}:{port}/api/docs", err=True)
     click.echo(f"  Dashboard:  http://{host}:{port}/dashboard/", err=True)

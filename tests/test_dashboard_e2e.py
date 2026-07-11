@@ -18,11 +18,9 @@ from pathlib import Path
 
 import pytest
 
-
 # Skip entire module if playwright isn't available
 playwright = pytest.importorskip("playwright")
 from playwright.sync_api import Page, expect, sync_playwright  # noqa: E402
-
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 

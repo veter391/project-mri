@@ -2,7 +2,6 @@
 
 We test against tiny synthetic repos so each test is <1s and fully deterministic.
 """
-import asyncio
 import shutil
 import tempfile
 from pathlib import Path

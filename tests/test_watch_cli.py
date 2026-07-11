@@ -1,9 +1,6 @@
 """Tests for v0.3.0 watch mode + CLI commands."""
 from __future__ import annotations
 
-import os
-import shutil
-import tempfile
 import threading
 import time
 from pathlib import Path

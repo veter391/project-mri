@@ -104,7 +104,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["S"]
+"tests/*" = ["S", "ASYNC221"]  # tests may call blocking subprocess (git setup) inside async cases
 "*/migrations/*" = ["B008"]
 # These are intentional defensive patterns used across the codebase
 "src/mri/api/routes/*.py" = ["B008", "S110"]  # FastAPI Depends() in defaults; webhook/swallow is non-fatal

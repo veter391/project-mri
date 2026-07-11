@@ -1,13 +1,8 @@
 """Tests for v0.3.0 features: config, auth, repo cloning, webhook, diff, SARIF."""
 from __future__ import annotations
 
-import json
 import os
-import shutil
-import subprocess
-import tempfile
 from pathlib import Path
-from urllib.parse import urlparse
 
 import pytest
 from fastapi.testclient import TestClient
@@ -22,14 +17,11 @@ from mri.auth.users import (
     verify_password,
     verify_token,
 )
-from mri.config import load_config, write_default_config, get_config
+from mri.config import load_config, write_default_config
 from mri.services.repo_cloner import (
-    CloneError,
-    RepoUrl,
     parse_repo_url,
 )
 from mri.services.webhook import send_webhook
-
 
 # ---------------------------------------------------------------------------
 # Config tests
@@ -405,7 +397,8 @@ def two_scans(tmp_path, monkeypatch):
 
     # Create a project
     import asyncio
-    from mri.db.repository import get_connection, upsert_project, create_scan, update_scan_status
+
+    from mri.db.repository import create_scan, get_connection, update_scan_status, upsert_project
 
     async def setup():
         async with get_connection() as conn:

@@ -1,5 +1,4 @@
 """Integration test: scan a tiny git repo via the API."""
-import asyncio
 import shutil
 import subprocess
 import tempfile
@@ -9,7 +8,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 from mri.api.app import create_app
-from mri.db.repository import default_db_path, get_connection
 
 
 @pytest.fixture

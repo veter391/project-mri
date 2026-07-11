@@ -3,16 +3,14 @@
 Each test pins one specific bug we found during the audit and confirms
 the fix works. If any of these regress, the bug is back.
 """
-import asyncio
 import shutil
-import subprocess
 import tempfile
 from pathlib import Path
 
 import pytest
 
-from mri.analyzers.dependencies import DependenciesAnalyzer
 from mri.analyzers.coupling import CouplingAnalyzer
+from mri.analyzers.dependencies import DependenciesAnalyzer
 from mri.analyzers.tech_debt import TechDebtAnalyzer
 from mri.services.scanner import ScanContext
 
@@ -151,8 +149,9 @@ async def test_tech_debt_no_dead_computation(tmp: Path):
 
 def test_repository_no_duplicate_functions():
     """Pin: get_scan_by_uuid/get_scan_runs/get_findings should appear once each."""
-    from mri.db import repository
     import inspect
+
+    from mri.db import repository
     src = inspect.getsource(repository)
     for fn in ("get_scan_by_uuid", "get_scan_runs", "get_findings"):
         # Count `async def fn(` — exact match
@@ -217,8 +216,9 @@ async def test_comment_ratio_is_null_when_parser_absent(tmp: Path, monkeypatch):
 
 def test_metrics_uses_prometheus_client():
     """Verify metrics come from prometheus_client, not a hand-rolled module."""
+    from prometheus_client import Counter, Gauge, Histogram
+
     from mri import metrics
-    from prometheus_client import Counter, Histogram, Gauge
     assert isinstance(metrics.HTTP_REQUESTS, Counter)
     assert isinstance(metrics.HTTP_DURATION, Histogram)
     assert isinstance(metrics.ACTIVE_SCANS, Gauge)

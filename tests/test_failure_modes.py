@@ -1,12 +1,7 @@
 """Failure-mode tests — what happens when things go wrong."""
 from __future__ import annotations
 
-import asyncio
 import os
-import shutil
-import subprocess
-import tempfile
-from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient

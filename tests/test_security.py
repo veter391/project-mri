@@ -5,8 +5,6 @@ Run with: PYTHONPATH=. pytest tests/test_security.py -v
 from __future__ import annotations
 
 import os
-import tempfile
-from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -22,7 +20,6 @@ from mri.security import (
     validate_project_path,
     validate_slug,
 )
-
 
 # ---------------------------------------------------------------------------
 # Unit tests for security helpers
