@@ -6,7 +6,7 @@
 ![License: MIT](https://img.shields.io/badge/license-MIT-amber)
 ![Version](https://img.shields.io/badge/version-0.3.0-amber)
 ![Status: Beta](https://img.shields.io/badge/status-beta-amber)
-![Tests: 134 passing](https://img.shields.io/badge/tests-134%20passing-amber)
+[![CI](https://github.com/veter391/project-mri/actions/workflows/ci.yml/badge.svg)](https://github.com/veter391/project-mri/actions/workflows/ci.yml)
 
 **project-mri** analyzes your codebase across **6 dimensions** — git history,
 architecture, dependencies, complexity, tech debt, coupling — and produces a
@@ -15,7 +15,7 @@ Zero accounts.**
 
 ```bash
 # One-line install:
-curl -fsSL https://raw.githubusercontent.com/project-mri/project-mri/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/veter391/project-mri/main/scripts/install.sh | bash
 
 # Then:
 mri init          # create your admin user
@@ -42,7 +42,7 @@ Every score explains itself.
 - **100% self-hosted** — `pip install project-mri`, that's it
 - **Single-user admin** — no registration, no multi-tenant, no SaaS
 - **Six analyzers** — git history, architecture, dependencies, complexity, tech debt, coupling
-- **Self-hosted dashboard** — terminal-aesthetic SPA at `/dashboard/`
+- **Self-hosted dashboard** — terminal-aesthetic Next.js UI at `/dashboard/`, shipped in the wheel
 - **Repository cloning** — scan `https://github.com/owner/repo.git` directly
 - **CI integration** — official GitHub Action, GitLab CI template
 - **SARIF export** — for GitHub Code Scanning, IDE integration
@@ -58,7 +58,7 @@ Every score explains itself.
 ### Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/project-mri/project-mri/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/veter391/project-mri/main/scripts/install.sh | bash
 ```
 
 Or with pip:
@@ -67,12 +67,14 @@ pip install --user project-mri
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-Or with Docker:
+Or with Docker (build from source):
 ```bash
-docker pull ghcr.io/project-mri/project-mri:latest
+git clone https://github.com/veter391/project-mri.git
+cd project-mri
+docker build -t project-mri .
 docker run -d --name project-mri -p 7331:7331 \
   -v mri-data:/home/mri/.cache/project-mri \
-  ghcr.io/project-mri/project-mri:latest
+  project-mri
 ```
 
 ### First run
@@ -106,43 +108,43 @@ Reports are written to `~/.cache/project-mri/reports/<uuid>.html`.
 
 ## Repository layout
 
+The repo is a hybrid monorepo: a Python package (`src`-layout) plus a pnpm
+workspace of Next.js apps.
+
 ```
 project-mri/
-├── *.html, css/, ts/, dist/     # Static marketing site (7 pages)
-├── data/                        # Bundled demo JSON
-├── dashboard/                   # Self-hosted dashboard SPA
-│   ├── ts/                      # Vanilla TypeScript (no framework)
-│   ├── dist/                    # Compiled JS
-│   ├── css/                     # Design system
-│   └── index.html
-├── backend/
-│   ├── mri/                     # Python package
-│   │   ├── analyzers/           # 6 analyzers
-│   │   ├── auth/                # JWT + bcrypt
-│   │   ├── api/routes/          # FastAPI routes
-│   │   ├── services/            # scanner, repo_cloner, webhook, watcher
-│   │   ├── db/                  # schema + repository
-│   │   ├── security.py          # path validation, branch validation
-│   │   ├── middleware.py        # 5 middlewares
-│   │   ├── config.py            # .mri.yml loader
-│   │   ├── metrics.py           # prometheus_client integration
-│   │   └── cli.py               # 11 Click commands
-│   └── tests/                   # 134 tests (incl. Playwright E2E)
+├── pyproject.toml               # Python package (src-layout), pinned deps
+├── pnpm-workspace.yaml          # pnpm workspace → apps/*
+├── package.json                 # workspace scripts (dev/build web + dashboard)
+├── src/mri/                     # Python package (import name: mri)
+│   ├── analyzers/               # 6 analyzers
+│   ├── api/                     # FastAPI app, routes, middleware
+│   ├── auth/                    # JWT + bcrypt
+│   ├── services/                # scanner, repo_cloner, webhook, watcher
+│   ├── db/                      # schema.sql + repository
+│   ├── _frontend/dashboard/     # built dashboard, embedded at build time (gitignored)
+│   ├── security.py              # path/branch validation, safe-bind guard
+│   ├── config.py                # .mri.yml loader
+│   ├── metrics.py               # prometheus_client integration
+│   └── cli.py                   # Click commands
+├── apps/
+│   ├── web/                     # Next.js 15 marketing site
+│   └── dashboard/               # Next.js 15 dashboard → static export, embedded in the wheel
+├── tests/                       # pytest suite (unit + API + E2E)
+├── docs/                        # API, CONFIG, DASHBOARD, INSTALL, INTEGRATIONS
 ├── .github/
-│   ├── workflows/ci.yml         # CI: lint, test, build, audit
-│   └── action/action.yml        # Official GitHub Action
+│   ├── workflows/ci.yml         # lint, tests, Next builds, Docker, Bandit, pip-audit
+│   └── action/action.yml        # official GitHub Action
 ├── ci/gitlab-ci.yml             # GitLab CI template
-├── install.sh                   # One-liner installer
-├── Dockerfile                   # Multi-stage, non-root, distroless
-├── docker-compose.yml
-├── LICENSE, CHANGELOG.md, CONTRIBUTING.md, CODE_OF_CONDUCT.md, SECURITY.md
-├── README.md (this file)
-├── INSTALL.md                   # Detailed install guide
-├── DASHBOARD.md                 # Dashboard user guide
-├── API.md                       # HTTP API reference
-├── INTEGRATIONS.md              # Webhooks, CI/CD, IDE integration
-└── CONFIG.md                    # .mri.yml reference
+├── deploy/docker-compose.yml
+├── scripts/install.sh           # one-liner installer
+├── Dockerfile                   # multi-stage, non-root
+└── LICENSE, CHANGELOG.md, CONTRIBUTING.md, CODE_OF_CONDUCT.md, SECURITY.md
 ```
+
+The dashboard ships **inside the Python wheel**: `apps/dashboard` builds a static
+Next.js export that is copied into `src/mri/_frontend/dashboard` and served by
+FastAPI at `/dashboard/` — so `pip install project-mri` needs no Node runtime.
 
 ---
 
@@ -224,10 +226,10 @@ Full reference: [API.md](./docs/API.md)
 ## Tech stack
 
 - **Backend**: Python 3.10+, FastAPI, aiosqlite, GitPython, tree-sitter, Jinja2, Pydantic v2, bcrypt, PyJWT, watchdog, prometheus-client, click
-- **Frontend (marketing site)**: Vanilla TypeScript → ES modules, custom CSS, JetBrains Mono
-- **Frontend (dashboard)**: Vanilla TypeScript SPA, ~30KB, no framework
+- **Frontend**: Next.js 15 + TypeScript + Tailwind v4, JetBrains Mono — `apps/web` (marketing site) and `apps/dashboard` (static export embedded in the wheel)
+- **Tooling**: pnpm workspace, `src`-layout Python package
 - **Tests**: pytest, pytest-asyncio, httpx, Playwright (E2E)
-- **CI**: GitHub Actions (lint + tests + Docker build + Bandit + pip-audit)
+- **CI**: GitHub Actions (lint + tests + Next builds + Docker build + Bandit + pip-audit)
 
 ---
 
@@ -271,26 +273,26 @@ For production deployments, see [INTEGRATIONS.md → expose publicly](./docs/INT
 
 ```bash
 # Clone
-git clone https://github.com/project-mri/project-mri.git
+git clone https://github.com/veter391/project-mri.git
 cd project-mri
 
-# Backend dev
-cd backend
+# Backend (src-layout, editable install)
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
 mri init
-PYTHONPATH=. pytest tests/ -v          # 134 tests
+pytest                                 # runs tests/
 
-# Frontend dev
-cd ..
-npm run build                          # tsc → dist/
-npm run serve                          # python server with .html auto-rewrite
+# Frontend (pnpm workspace)
+pnpm install
+pnpm dev:web                           # marketing site (Next.js)
+pnpm dev:dashboard                     # dashboard (Next.js)
+pnpm build:dashboard                   # static export → embedded into src/mri/_frontend
 
-# Or full validation
-bandit -r backend/mri/                 # 0/0/0
-ruff check backend/mri/                # clean
-pip-audit --strict --requirement backend/requirements.txt  # 0 vulnerabilities
+# Lint + security gate
+ruff check src/mri
+bandit -r src/mri
+pip-audit --strict
 ```
 
 ---
