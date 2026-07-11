@@ -94,6 +94,16 @@ function Login({ onLogin }: { onLogin: () => void }) {
 const BAND = (h?: number) =>
   h == null ? "text-mute" : h >= 75 ? "text-ok" : h >= 50 ? "text-warn" : "text-alert";
 
+const healthOf = (s: Scan) => s.summary?.overall_health;
+
+// started_at may be ISO (completed scans) or SQLite "YYYY-MM-DD HH:MM:SS" UTC
+// (pending). Normalize the latter so it doesn't render "Invalid Date".
+function fmtDate(raw: string): string {
+  const iso = /[T]|[+Z]$/.test(raw) ? raw : `${raw.replace(" ", "T")}Z`;
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? raw : d.toLocaleString();
+}
+
 function Overview({ onLogout }: { onLogout: () => void }) {
   const [scans, setScans] = useState<Scan[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -113,7 +123,7 @@ function Overview({ onLogout }: { onLogout: () => void }) {
     void load();
   }, [load]);
 
-  const healths = (scans ?? []).map((s) => s.score?.health).filter((h): h is number => h != null);
+  const healths = (scans ?? []).map(healthOf).filter((h): h is number => h != null);
   const avg = healths.length ? Math.round(healths.reduce((a, b) => a + b, 0) / healths.length) : null;
 
   return (
@@ -159,8 +169,8 @@ function Overview({ onLogout }: { onLogout: () => void }) {
                   <tr key={s.scan_uuid} className="border-t border-line">
                     <td className="px-4 py-2">{s.project_name}</td>
                     <td className="px-4 py-2 text-mute">{s.status}</td>
-                    <td className={`px-4 py-2 ${BAND(s.score?.health)}`}>{s.score?.health ?? "—"}</td>
-                    <td className="px-4 py-2 text-mute">{new Date(s.started_at).toLocaleString()}</td>
+                    <td className={`px-4 py-2 ${BAND(healthOf(s))}`}>{healthOf(s) ?? "—"}</td>
+                    <td className="px-4 py-2 text-mute">{fmtDate(s.started_at)}</td>
                   </tr>
                 ))}
               </tbody>

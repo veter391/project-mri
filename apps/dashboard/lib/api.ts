@@ -35,13 +35,15 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return (await res.json()) as T;
 }
 
+// Shape mirrors GET /api/scans: each row is `scans.*` joined with the project
+// name, plus `summary` parsed from summary_json (holds overall_health once the
+// scan completes). See src/mri/api/routes/scans.py::list_scans.
 export interface Scan {
   scan_uuid: string;
   project_name: string;
   status: string;
   started_at: string;
-  duration_s?: number;
-  score?: { health?: number } | null;
+  summary?: { overall_health?: number } | null;
 }
 
 export const login = (username: string, password: string) =>
@@ -50,4 +52,4 @@ export const login = (username: string, password: string) =>
     body: JSON.stringify({ username, password }),
   });
 
-export const listScans = () => api<{ scans: Scan[]; total: number }>("/scans?limit=20");
+export const listScans = () => api<{ scans: Scan[]; count: number }>("/scans?limit=20");
