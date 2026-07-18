@@ -17,7 +17,7 @@ from git import Repo as GitRepo
 from git.exc import InvalidGitRepositoryError, NoSuchPathError
 
 from mri.analyzers.architecture import ArchitectureAnalyzer
-from mri.analyzers.base import BaseAnalyzer, ScanContext
+from mri.analyzers.base import BaseAnalyzer, ScanContext, Stage
 from mri.analyzers.complexity import ComplexityAnalyzer
 from mri.analyzers.coupling import CouplingAnalyzer
 from mri.analyzers.dependencies import DependenciesAnalyzer
@@ -173,12 +173,14 @@ class Scanner:
         # CPU-bound, so the GIL means threads buy no throughput, and they share
         # the context's content/AST cache, which sequential access keeps free of
         # races. The win here is responsiveness, not speed.
+        ordered = self._execution_order(self.ANALYZERS)
+
         async def run_one(Cls: type, i: int) -> Any:
-            pct = 15 + (i * 75 / len(self.ANALYZERS))
+            pct = 15 + (i * 75 / len(ordered))
             analyzer = Cls()
             await self._emit(
                 "analyze",
-                f"{analyzer.name} ({i + 1}/{len(self.ANALYZERS)})",
+                f"{analyzer.name} ({i + 1}/{len(ordered)})",
                 pct,
             )
             try:
@@ -186,6 +188,8 @@ class Scanner:
             except Exception as exc:
                 # analyzers handle their own errors; this catches structural ones
                 analyzer._finish_err(f"unhandled: {type(exc).__name__}: {exc}")
+            # Publish for anything downstream that declared a dependency on it.
+            ctx.results[analyzer.name] = analyzer.run
             return analyzer.run
 
         # ACTIVE_SCANS is incremented here and decremented in finally so the gauge
@@ -193,7 +197,7 @@ class Scanner:
         from mri import metrics as _metrics
         _metrics.ACTIVE_SCANS.inc()
         try:
-            runs = [await run_one(Cls, i) for i, Cls in enumerate(self.ANALYZERS)]
+            runs = [await run_one(Cls, i) for i, Cls in enumerate(ordered)]
 
             # Compose report
             await self._emit("compose", "scoring", 92)
@@ -283,6 +287,47 @@ class Scanner:
                 except (OSError, PermissionError):
                     continue
         return out
+
+    @staticmethod
+    def _execution_order(analyzers: list[type[BaseAnalyzer]]) -> list[type[BaseAnalyzer]]:
+        """Producers first, then derived analyzers in dependency order.
+
+        A flat list of peers cannot express that risk-by-authorship needs the
+        git history, or that decision provenance needs authorship. Ordering is a
+        topological sort over `requires`; an unknown or cyclic dependency raises
+        rather than letting an analyzer read an empty result and report a
+        confident number built on nothing.
+        """
+        by_name = {a.name: a for a in analyzers}
+        for analyzer in analyzers:
+            missing = [r for r in analyzer.requires if r not in by_name]
+            if missing:
+                raise ValueError(
+                    f"analyzer '{analyzer.name}' requires {missing}, which is not registered"
+                )
+
+        ordered: list[type[BaseAnalyzer]] = []
+        placed: set[str] = set()
+        visiting: set[str] = set()
+
+        def place(analyzer: type[BaseAnalyzer]) -> None:
+            if analyzer.name in placed:
+                return
+            if analyzer.name in visiting:
+                raise ValueError(f"dependency cycle involving analyzer '{analyzer.name}'")
+            visiting.add(analyzer.name)
+            for required in analyzer.requires:
+                place(by_name[required])
+            visiting.discard(analyzer.name)
+            placed.add(analyzer.name)
+            ordered.append(analyzer)
+
+        # Stage first, declaration order within a stage, then dependencies.
+        for stage in (Stage.PRODUCER, Stage.FUSION):
+            for analyzer in analyzers:
+                if analyzer.stage is stage:
+                    place(analyzer)
+        return ordered
 
     @staticmethod
     def _open_git(path: Path) -> GitRepo | None:

@@ -10,6 +10,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from enum import Enum
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -30,6 +31,21 @@ class ScanContext:
     git: Any  # git.Repo — kept untyped to avoid hard dep here
     include_globs: list[str] | None = None
     exclude_globs: list[str] | None = None
+
+    # Output of the analyzers that already ran this scan, keyed by name. A
+    # derived analyzer reads its inputs from here rather than recomputing them.
+    results: dict[str, AnalyzerRun] = field(default_factory=dict)
+
+    # Inputs that do not live in the scanned tree: agent session logs, ingested
+    # external metrics, whatever later layers need. Keyed by source name so the
+    # context does not grow one field per layer and turn into a god-object.
+    sources: dict[str, Any] = field(default_factory=dict)
+
+    # Earlier scans of the same project, most recent first. Correlating a change
+    # with its later consequences is inherently temporal, and the
+    # single-snapshot contract had nowhere to express that. Empty unless a
+    # caller supplies it.
+    previous_scans: list[dict[str, Any]] = field(default_factory=list)
 
     # Shared caches. The analyzers each used to read and parse the same files:
     # measured at five read passes and three tree-sitter parses over the corpus.
@@ -106,14 +122,34 @@ class ScanContext:
         return tree
 
 
+class Stage(str, Enum):
+    """When an analyzer runs.
+
+    PRODUCER analyzers extract facts straight from the repository and depend on
+    nothing but the context. FUSION analyzers derive from what producers found —
+    risk decomposed by authorship, decisions linked to their consequences — so
+    they must run afterwards and in dependency order. Six equal peers in one
+    list could not express that.
+    """
+
+    PRODUCER = "producer"
+    FUSION = "fusion"
+
+
 class BaseAnalyzer(ABC):
-    """Base class for all 6 analyzers."""
+    """Base class for all analyzers."""
 
     name: str = "unnamed"
     description: str = ""
     score_label: str = "unnamed_score"
     # Higher weight = more impact on overall_health.
     weight: float = 1.0
+    #: Which stage this analyzer belongs to.
+    stage: ClassVar[Stage] = Stage.PRODUCER
+    #: Names of analyzers whose output this one reads from `ctx.results`.
+    #: The scanner orders by this and refuses to run on a missing or cyclic
+    #: dependency rather than silently handing over an empty result.
+    requires: ClassVar[tuple[str, ...]] = ()
 
     def __init__(self) -> None:
         self.run = AnalyzerRun(name=self.name)
