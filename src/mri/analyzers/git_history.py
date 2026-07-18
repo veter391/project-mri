@@ -10,10 +10,16 @@ Score: starts at 100, subtracts weighted penalties.
 """
 from __future__ import annotations
 
+import logging
 from collections import Counter, defaultdict
 from datetime import datetime
+from typing import Any
+
+from git.exc import GitCommandError
 
 from mri.analyzers.base import BaseAnalyzer, ScanContext
+
+logger = logging.getLogger("mri.analyzers.git_history")
 
 
 class GitHistoryAnalyzer(BaseAnalyzer):
@@ -26,6 +32,9 @@ class GitHistoryAnalyzer(BaseAnalyzer):
     HOTSPOT_TOP_N = 10
     BUS_FACTOR_TARGET = 0.80  # 80% of changes covered
     KNOWLEDGE_ISLAND_MAX_AUTHORS = 1
+    # Upper bound on history depth, so a very old repository cannot make a
+    # scan unbounded. Shared by the commit walk and the churn collection.
+    MAX_COMMITS = 10_000
 
     async def analyze(self, ctx: ScanContext) -> None:  # type: ignore[override]
         self._start()
@@ -51,7 +60,7 @@ class GitHistoryAnalyzer(BaseAnalyzer):
                     branch = git.active_branch.name
                 except Exception:  # nosem: bandit  # detached HEAD or unborn branch
                     branch = "HEAD"
-            commits = list(git.iter_commits(branch, max_count=10000))
+            commits = list(git.iter_commits(branch, max_count=self.MAX_COMMITS))
             if not commits:
                 self._set_score(50.0, ["no commits found on branch " + ctx.branch])
                 self._add_finding(
@@ -69,34 +78,15 @@ class GitHistoryAnalyzer(BaseAnalyzer):
             file_authors: dict[str, set[str]] = defaultdict(set)
             author_total: Counter[str] = Counter()
 
-            for commit in commits:
-                author = (commit.author.email or commit.author.name or "unknown").lower()
-                author_total[author] += 1
-                try:
-                    stats = commit.stats
-                except Exception:
-                    continue  # nosec B112
-                for path_str in stats.files.keys():
-                    if ctx.is_excluded(path_str):
-                        continue
-                    fstats = stats.files[path_str]
-                    # churn = insertions + deletions. GitPython's per-file `lines`
-                    # already equals insertions + deletions, so we sum the two
-                    # components explicitly to avoid double-counting deletions.
-                    insertions = (
-                        fstats.get("insertions", 0)
-                        if isinstance(fstats, dict)
-                        else getattr(fstats, "insertions", 0)
-                    )
-                    deletions = (
-                        fstats.get("deletions", 0)
-                        if isinstance(fstats, dict)
-                        else getattr(fstats, "deletions", 0)
-                    )
-                    churn = insertions + deletions
-                    file_churn[path_str] += churn
-                    file_commits[path_str] += 1
-                    file_authors[path_str].add(author)
+            self._collect_churn(
+                git,
+                ctx,
+                branch=branch,
+                file_churn=file_churn,
+                file_commits=file_commits,
+                file_authors=file_authors,
+                author_total=author_total,
+            )
 
             # --- Hotspots (files with high churn AND many commits) ---
             hotspots = []
@@ -211,6 +201,79 @@ class GitHistoryAnalyzer(BaseAnalyzer):
         except Exception as exc:  # pragma: no cover
             self._finish_err(f"{type(exc).__name__}: {exc}")
             raise
+
+    # Record and field separators that cannot occur in an email or a path.
+    _REC = "\x01"
+    _FLD = "\x02"
+
+    @classmethod
+    def _collect_churn(
+        cls,
+        git: Any,
+        ctx: ScanContext,
+        *,
+        branch: str,
+        file_churn: dict[str, int],
+        file_commits: dict[str, int],
+        file_authors: dict[str, set[str]],
+        author_total: dict[str, int],
+    ) -> None:
+        """Accumulate per-file churn from a single `git log --numstat`.
+
+        GitPython's `commit.stats` shells out to `git diff` once per commit —
+        measured at 36 ms each, which is six minutes on a 10,000-commit history.
+        One `git log` covering the whole range costs a single process.
+        """
+        # `git` is a GitPython Repo; the raw command namespace is `repo.git`.
+        try:
+            raw = git.git.log(
+                f"-{cls.MAX_COMMITS}",
+                "--numstat",
+                "--no-renames",
+                f"--format={cls._REC}%H{cls._FLD}%ae{cls._FLD}%an",
+                branch,
+            )
+        except GitCommandError as exc:
+            # History we cannot read is reported as empty — but never silently.
+            # An empty result is indistinguishable from a repo with no churn,
+            # so it has to be visible in the log.
+            logger.warning(
+                "git_history.log_failed",
+                extra={
+                    "event": "git_history.log_failed",
+                    "branch": branch,
+                    "error": str(exc)[:200],
+                },
+            )
+            return
+
+        for record in raw.split(cls._REC):
+            if not record.strip():
+                continue
+            header, _, body = record.partition("\n")
+            fields = header.split(cls._FLD)
+            if len(fields) < 3:
+                continue
+            email, name = fields[1], fields[2]
+            author = (email or name or "unknown").lower()
+            author_total[author] = author_total.get(author, 0) + 1
+
+            for line in body.splitlines():
+                if not line.strip():
+                    continue
+                parts = line.split("\t")
+                if len(parts) != 3:
+                    continue
+                added, removed, path_str = parts
+                if ctx.is_excluded(path_str):
+                    continue
+                # Binary files report "-" for both counts.
+                churn = (int(added) if added.isdigit() else 0) + (
+                    int(removed) if removed.isdigit() else 0
+                )
+                file_churn[path_str] = file_churn.get(path_str, 0) + churn
+                file_commits[path_str] = file_commits.get(path_str, 0) + 1
+                file_authors[path_str].add(author)
 
     @staticmethod
     def _cadence(commits: list) -> dict:
