@@ -5,9 +5,12 @@
 version: 2
 
 updates:
-  # --- Python backend (pip / pyproject) ---
+  # --- Python package (pip / pyproject) ---
   - package-ecosystem: "pip"
-    directory: "/backend"
+    # Repo root since the src-layout move: pyproject.toml, requirements.txt and
+    # uv.lock all live here. Pointing at /backend silently disabled CVE alerts
+    # for the entire Python tree.
+    directory: "/"
     schedule:
       interval: "weekly"
       day: "monday"

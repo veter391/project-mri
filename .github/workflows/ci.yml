@@ -7,6 +7,10 @@ on:
     branches: [main, master, develop]
   workflow_dispatch:
 
+# Least privilege by default; jobs escalate only if they ever need to.
+permissions:
+  contents: read
+
 # Cancel in-progress runs on the same branch
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -124,6 +128,62 @@ jobs:
         run: python -m playwright install --with-deps chromium
       - name: Run e2e + axe
         run: pytest tests/test_dashboard_e2e.py -v
+
+  # -----------------------------------------------------------------------
+  # Packaging — exercise the artifact users actually install. Every other job
+  # runs `pip install -e .`, which serves the dashboard from the source tree
+  # and would never notice a wheel shipping without it.
+  # -----------------------------------------------------------------------
+  package:
+    name: Wheel builds, installs and serves
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Build + embed the dashboard
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --filter @mri/dashboard build
+      - name: Build wheel and sdist
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build
+      - name: Assert the dashboard is inside the wheel
+        run: |
+          python - <<'PY'
+          import glob, sys, zipfile
+          whl = sorted(glob.glob("dist/*.whl"))[-1]
+          names = zipfile.ZipFile(whl).namelist()
+          required = [
+              "mri/_frontend/dashboard/index.html",
+              "mri/_frontend/dashboard/csp-script-hashes.json",
+          ]
+          missing = [r for r in required if not any(n.endswith(r) for n in names)]
+          if missing:
+              sys.exit(f"wheel {whl} is missing: {missing}")
+          print(f"{whl}: dashboard present ({sum('_frontend' in n for n in names)} files)")
+          PY
+      - name: Install the wheel in a clean env and serve it
+        run: |
+          python -m venv /tmp/venv
+          /tmp/venv/bin/pip install --upgrade pip
+          /tmp/venv/bin/pip install dist/*.whl
+          /tmp/venv/bin/mri serve --host 127.0.0.1 --port 7331 &
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:7331/api/health >/dev/null && break
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:7331/api/health >/dev/null || { echo "server did not start"; exit 1; }
+          code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:7331/dashboard/)
+          test "$code" = "200" || { echo "/dashboard/ returned $code from the installed wheel"; exit 1; }
+          echo "installed wheel serves /dashboard/"
 
   # -----------------------------------------------------------------------
   # Attribution hygiene — no AI-authorship attribution anywhere.

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
@@ -17,6 +18,9 @@ from mri.logging_setup import clear_request_id, set_request_id
 from mri.security import check_api_key, is_auth_enabled, sanitize_for_log
 
 logger = logging.getLogger("mri.middleware")
+
+# A base64-encoded sha256 digest: 43 chars of the base64 alphabet plus padding.
+_SHA256_B64 = re.compile(r"sha256-[A-Za-z0-9+/]{43}=")
 
 
 @lru_cache(maxsize=1)
@@ -33,7 +37,10 @@ def _dashboard_script_hashes() -> tuple[str, ...]:
         )
         if manifest.is_file():
             loaded = json.loads(manifest.read_text(encoding="utf-8"))
-            return tuple(h for h in loaded if isinstance(h, str) and h.startswith("sha256-"))
+            # Validate the full shape, not just the prefix: these values are
+            # interpolated into a CSP header, so anything containing a quote or
+            # space could smuggle in an extra directive.
+            return tuple(h for h in loaded if isinstance(h, str) and _SHA256_B64.fullmatch(h))
     except (OSError, ValueError, ModuleNotFoundError, NotADirectoryError):
         logger.warning("dashboard CSP manifest unreadable; keeping strict script-src")
     return ()
