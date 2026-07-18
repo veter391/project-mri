@@ -15,12 +15,11 @@ from typing import Any
 
 import aiosqlite
 
+from mri.db.migrator import migrate
+
 # ---------------------------------------------------------------------------
 # Path resolution
 # ---------------------------------------------------------------------------
-
-_SCHEMA_PATH = Path(__file__).parent / "schema.sql"
-
 
 def default_db_path() -> Path:
     """Return the default SQLite cache path. Override with MRI_DB env var."""
@@ -44,11 +43,6 @@ def default_db_path() -> Path:
 # ---------------------------------------------------------------------------
 
 
-def _apply_schema_sync() -> str:
-    """Read schema.sql and return its contents (I/O only)."""
-    return _SCHEMA_PATH.read_text(encoding="utf-8")
-
-
 @asynccontextmanager
 async def get_connection(db_path: Path | None = None) -> AsyncIterator[aiosqlite.Connection]:
     """Yield an aiosqlite connection with schema applied.
@@ -58,14 +52,17 @@ async def get_connection(db_path: Path | None = None) -> AsyncIterator[aiosqlite
     """
     path = db_path or default_db_path()
     path.parent.mkdir(parents=True, exist_ok=True)
+    # Bring the schema up to date before handing out a connection. Re-running
+    # the full schema here used to be the mechanism, but `CREATE TABLE IF NOT
+    # EXISTS` silently no-ops against an existing table, so schema changes would
+    # never reach an already-installed user. The migrator is a no-op when the
+    # database is current, and takes a write lock only when there is work to do.
+    await asyncio.to_thread(migrate, path)
     conn = await aiosqlite.connect(path)
     conn.row_factory = aiosqlite.Row
     await conn.execute("PRAGMA foreign_keys = ON")
     await conn.execute("PRAGMA journal_mode = WAL")
     await conn.execute("PRAGMA busy_timeout = 5000")
-    # aiosqlite schedules each call in its own thread, so this is safe.
-    schema_sql = await asyncio.to_thread(_apply_schema_sync)
-    await conn.executescript(schema_sql)
     try:
         yield conn
     finally:

@@ -1,10 +1,13 @@
+-- 0001_initial_schema.sql
+-- Baseline: the v0.3.x schema as it shipped before migrations existed.
+-- Databases created by v0.3.x already contain these objects and are
+-- stamped as having applied this migration rather than re-running it.
+
 -- ============================================================
 -- Project MRI — SQLite cache schema
 -- All persistent state lives here. Reports are JSON columns.
 -- ============================================================
 
-PRAGMA foreign_keys = ON;
-PRAGMA journal_mode = WAL;
 
 -- ----------------------------------------------------------------
 -- Projects — every scanned repo is one row here

@@ -187,16 +187,16 @@ def _record_clone(url: str, local_path: Path, default_branch: str | None = None)
     clone_repo runs inside ``asyncio.to_thread`` (no event loop in this worker
     thread), so the async ``get_connection`` context manager cannot be used
     here. We open a short-lived sync sqlite3 connection instead, mirroring the
-    pattern in ``services/webhook.py``. The schema is applied idempotently so
+    pattern in ``services/webhook.py``. The schema is brought up to date first so
     the row persists even on the CLI ``mri scan <url>`` path.
     """
+    from mri.db.migrator import migrate
+
     now = datetime.now(timezone.utc).isoformat()
     db_path = default_db_path()
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    schema_sql = (Path(__file__).parent.parent / "db" / "schema.sql").read_text(encoding="utf-8")
+    migrate(db_path)
     conn = sqlite3.connect(str(db_path), isolation_level=None)
     try:
-        conn.executescript(schema_sql)
         conn.execute("PRAGMA foreign_keys = ON")
         conn.execute(
             """

@@ -83,7 +83,7 @@ exclude = ["tests*"]
 # `output: 'export'`) copied into src/mri/_frontend/dashboard at build time.
 # It is gitignored but lives inside the `mri` package, so this recursive glob
 # ships it in the wheel. `mri serve` then serves it with no Node runtime.
-mri = ["db/*.sql", "templates/*.html", "templates/*.j2", "_frontend/**/*"]
+mri = ["db/**/*.sql", "templates/*.html", "templates/*.j2", "_frontend/**/*"]
 
 [tool.setuptools]
 include-package-data = true

@@ -16,7 +16,6 @@ import asyncio
 import json
 import logging
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
 import httpx
@@ -113,14 +112,13 @@ class _delivery_record:
         def _insert() -> int:
             import sqlite3
 
+            from mri.db.migrator import migrate
             from mri.db.repository import default_db_path
+
             db_path = default_db_path()
-            db_path.parent.mkdir(parents=True, exist_ok=True)
+            migrate(db_path)
             conn = sqlite3.connect(str(db_path), isolation_level=None)
             try:
-                # Make sure schema is applied (idempotent CREATE IF NOT EXISTS)
-                schema_sql = (Path(__file__).parent.parent / "db" / "schema.sql").read_text()
-                conn.executescript(schema_sql)
                 cur = conn.execute(
                     """
                     INSERT INTO webhook_deliveries

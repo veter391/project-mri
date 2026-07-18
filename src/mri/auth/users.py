@@ -14,7 +14,6 @@ from __future__ import annotations
 import secrets
 import sqlite3
 import time
-from pathlib import Path
 from typing import Any
 
 import bcrypt
@@ -24,16 +23,14 @@ import jwt
 # Sync DB connection (auth users can be created/synced from CLI which is sync)
 # ---------------------------------------------------------------------------
 
-_SCHEMA_PATH = Path(__file__).parent.parent / "db" / "schema.sql"
-
-
 def _sync_conn() -> sqlite3.Connection:
-    """Open a synchronous sqlite3 connection with the schema applied."""
+    """Open a synchronous sqlite3 connection with the schema up to date."""
+    from mri.db.migrator import migrate
     from mri.db.repository import default_db_path
+
     db_path = default_db_path()
-    db_path.parent.mkdir(parents=True, exist_ok=True)
+    migrate(db_path)
     conn = sqlite3.connect(str(db_path), isolation_level=None)
-    conn.executescript(_SCHEMA_PATH.read_text(encoding="utf-8"))
     conn.row_factory = sqlite3.Row
     return conn
 

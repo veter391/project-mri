@@ -407,7 +407,69 @@ def upgrade() -> None:  # nosec B404  # subprocess needed for pip
     if result.returncode != 0:
         click.echo("✗ upgrade failed", err=True)
         sys.exit(1)
-    click.echo("✓ upgrade complete (no migrations needed for v0.3.x)", err=True)
+
+    # Apply schema migrations in a fresh interpreter: this process still has the
+    # pre-upgrade code (and therefore the old migration files) imported.
+    click.echo("→ applying schema migrations", err=True)
+    migrated = subprocess.run(  # nosec B603  # fixed args, no shell
+        [sys.executable, "-m", "mri.cli", "db", "upgrade"],
+        capture_output=False,
+    )
+    if migrated.returncode != 0:
+        click.echo("✗ schema migration failed — the database is unchanged", err=True)
+        sys.exit(1)
+    click.echo("✓ upgrade complete", err=True)
+
+
+# ---------------------------------------------------------------------------
+# mri db — inspect and migrate the local database
+# ---------------------------------------------------------------------------
+
+
+@cli.group()
+def db() -> None:
+    """Inspect and migrate the local database."""
+
+
+@db.command("upgrade")
+def db_upgrade() -> None:
+    """Apply any pending schema migrations."""
+    from mri.db.migrator import MigrationError, migrate
+    from mri.db.repository import default_db_path
+
+    path = default_db_path()
+    try:
+        applied = migrate(path)
+    except MigrationError as exc:
+        click.echo(f"✗ {exc}", err=True)
+        click.echo("  the database was left unchanged", err=True)
+        sys.exit(1)
+    if applied:
+        for name in applied:
+            click.echo(f"  applied {name}", err=True)
+        click.echo(f"✓ {len(applied)} migration(s) applied", err=True)
+    else:
+        click.echo("✓ schema is up to date", err=True)
+
+
+@db.command("status")
+def db_status() -> None:
+    """Show which migrations have been applied and which are pending."""
+    from mri.db.migrator import applied_migrations, pending_migrations
+    from mri.db.repository import default_db_path
+
+    path = default_db_path()
+    click.echo(f"database: {path}")
+    if not path.exists():
+        click.echo("  (not created yet — it is created on first use)")
+        return
+    for name in sorted(applied_migrations(path)):
+        click.echo(f"  applied  {name}")
+    pending = pending_migrations(path)
+    for name in pending:
+        click.echo(f"  PENDING  {name}")
+    if not pending:
+        click.echo("schema is up to date")
 
 
 # ---------------------------------------------------------------------------
@@ -458,15 +520,16 @@ def list_cmd(limit: int, project: str | None) -> None:
     """List recent scans in the local database."""
     import sqlite3
 
-    from mri.db.repository import _SCHEMA_PATH, default_db_path
+    from mri.db.migrator import migrate
+    from mri.db.repository import default_db_path
 
     db = default_db_path()
     if not db.exists():
         click.echo("  (no scans yet — run `mri scan <path>` first)", err=True)
         return
+    migrate(db)
     conn = sqlite3.connect(str(db), isolation_level=None)
     conn.row_factory = sqlite3.Row
-    conn.executescript(_SCHEMA_PATH.read_text(encoding="utf-8"))
     try:
         if project:
             cur = conn.execute(
