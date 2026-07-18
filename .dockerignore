@@ -20,3 +20,9 @@ tests/
 docs/
 *.md
 !README.md
+node_modules/
+.next/
+apps/**/out/
+# The dashboard is built in the Node stage — never inherit a local build,
+# otherwise the image content depends on the developer's working tree.
+src/mri/_frontend/

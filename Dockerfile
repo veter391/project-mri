@@ -1,5 +1,27 @@
 # syntax=docker/dockerfile:1.7
-# ---------- Stage 1: builder ----------
+# ---------- Stage 1: dashboard (Node) ----------
+# The dashboard is built inside the image with the same `pnpm build` used
+# locally, so the image never depends on a developer having built it first.
+# node >= 22.13 is required by pnpm 11 (see root package.json "engines")
+FROM node:22-slim AS frontend
+
+ENV CI=1
+RUN corepack enable
+WORKDIR /build
+
+# Workspace manifests first for layer caching; the lockfile must see every
+# workspace package or --frozen-lockfile fails.
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY apps/web/package.json apps/web/
+# Source must land before `pnpm install`: copying it afterwards would overlay
+# the workspace dir and wipe the node_modules links pnpm just created.
+COPY apps/dashboard apps/dashboard
+RUN pnpm install --frozen-lockfile --filter @mri/dashboard...
+
+# `build` = next build (static export) + embed into src/mri/_frontend/dashboard
+RUN pnpm --filter @mri/dashboard build
+
+# ---------- Stage 2: builder ----------
 FROM python:3.11-slim AS builder
 
 ENV PYTHONUNBUFFERED=1 \
@@ -15,15 +37,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /build
 
-# Install dependencies first (better layer caching)
+# Install dependencies first (better layer caching). requirements.txt is
+# generated from uv.lock and fully hash-pinned, so pip verifies every artifact.
 COPY requirements.txt ./
-# Pin tree-sitter<0.21 (the bundled tree_sitter_languages is broken on 0.21+)
-RUN sed -i 's/tree-sitter.*/tree-sitter<0.21/' requirements.txt || true
 RUN pip install --prefix=/install -r requirements.txt
 
 # Copy source (src-layout)
 COPY src ./src
 COPY pyproject.toml README.md ./
+
+# Take the dashboard from the Node stage, never from the build context
+COPY --from=frontend /build/src/mri/_frontend ./src/mri/_frontend
 
 # Install the package itself
 RUN pip install --prefix=/install --no-deps .

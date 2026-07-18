@@ -4,6 +4,9 @@
   "private": true,
   "description": "Monorepo workspace for project-mri — Next.js apps (web, dashboard) alongside the Python package in src/",
   "packageManager": "pnpm@11.1.2",
+  "engines": {
+    "node": ">=22.13"
+  },
   "scripts": {
     "dev:web": "pnpm --filter @mri/web dev",
     "dev:dashboard": "pnpm --filter @mri/dashboard dev",
