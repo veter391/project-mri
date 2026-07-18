@@ -85,14 +85,75 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"   # pnpm 11 requires node >= 22.13
           cache: pnpm
       - name: Install
         run: pnpm install --frozen-lockfile
+      - name: Type-check both apps (tsc)
+        run: pnpm -r --if-present typecheck
       - name: Build web (Next.js)
         run: pnpm --filter @mri/web build
       - name: Build dashboard (Next.js static export + embed)
         run: pnpm --filter @mri/dashboard build
+
+  # -----------------------------------------------------------------------
+  # Dashboard end-to-end + accessibility (real browser, real server)
+  # -----------------------------------------------------------------------
+  e2e:
+    name: Dashboard e2e + axe
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install web deps
+        run: pnpm install --frozen-lockfile
+      - name: Build + embed the dashboard
+        run: pnpm --filter @mri/dashboard build
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: Install browser
+        run: python -m playwright install --with-deps chromium
+      - name: Run e2e + axe
+        run: pytest tests/test_dashboard_e2e.py -v
+
+  # -----------------------------------------------------------------------
+  # Attribution hygiene — no AI-authorship attribution anywhere.
+  # Product mentions of AI coding tools are fine; authorship claims are not.
+  # -----------------------------------------------------------------------
+  attribution-hygiene:
+    name: Attribution hygiene
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Scan tree
+        run: |
+          set -e
+          pattern='Co-authored-by:[[:space:]]*Claude|Generated with[[:space:]]*\[?Claude|🤖[[:space:]]*Generated'
+          if grep -rIniE "$pattern" . --exclude-dir=.git --exclude-dir=node_modules; then
+            echo "::error::AI-authorship attribution found in the tree"
+            exit 1
+          fi
+          echo "tree clean"
+      - name: Scan commit messages
+        run: |
+          set -e
+          pattern='Co-authored-by:[[:space:]]*Claude|Generated with[[:space:]]*\[?Claude|🤖[[:space:]]*Generated'
+          if git log --format='%B' | grep -IniE "$pattern"; then
+            echo "::error::AI-authorship attribution found in commit messages"
+            exit 1
+          fi
+          echo "history clean"
 
   # -----------------------------------------------------------------------
   # Docker build + smoke

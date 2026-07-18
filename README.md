@@ -316,8 +316,9 @@ See [CHANGELOG.md](./CHANGELOG.md) for the full release history.
 
 ## License
 
-MIT. The core engine is MIT-licensed forever. Commercial features (managed
-hosting, enterprise SSO) will live on top of the open core, never instead of it.
+MIT — forever. The whole system is open source: all six analyzers, the API, the
+dashboard, the reports, the CI integrations. No paid tier, no feature gating, no
+telemetry, no account. Self-host it and own your data.
 
 ---
 

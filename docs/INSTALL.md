@@ -9,7 +9,7 @@ account registration. Just `pip install project-mri` and you're done.
 ## Quick install (one-liner)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/project-mri/project-mri/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/veter391/project-mri/main/scripts/install.sh | bash
 ```
 
 This will:
@@ -19,12 +19,12 @@ This will:
 
 To install for the current user only (no sudo):
 ```bash
-curl -fsSL https://raw.githubusercontent.com/project-mri/project-mri/main/install.sh | bash -s -- --user
+curl -fsSL https://raw.githubusercontent.com/veter391/project-mri/main/scripts/install.sh | bash -s -- --user
 ```
 
 To install system-wide (with sudo):
 ```bash
-curl -fsSL https://raw.githubusercontent.com/project-mri/project-mri/main/install.sh | bash -s -- --system
+curl -fsSL https://raw.githubusercontent.com/veter391/project-mri/main/scripts/install.sh | bash -s -- --system
 ```
 
 ---
@@ -46,13 +46,18 @@ export PATH="$HOME/.local/bin:$PATH"
 
 ## Install with Docker
 
+No image is published yet — build it from source. The image builds the dashboard
+itself (Node stage), so it never depends on your working tree:
+
 ```bash
-docker pull ghcr.io/project-mri/project-mri:latest
+git clone https://github.com/veter391/project-mri.git
+cd project-mri
+docker build -t project-mri .
 docker run -d \
   --name project-mri \
   -p 7331:7331 \
   -v mri-data:/home/mri/.cache/project-mri \
-  ghcr.io/project-mri/project-mri:latest
+  project-mri
 ```
 
 Dashboard will be at `http://localhost:7331/dashboard/`.
@@ -61,14 +66,49 @@ Dashboard will be at `http://localhost:7331/dashboard/`.
 
 ## Install from source (development)
 
+Requires Python 3.10+ and, for the web apps, Node >= 22.13 (pnpm 11 needs it).
+
 ```bash
-git clone https://github.com/project-mri/project-mri.git
-cd project-mri/backend
+git clone https://github.com/veter391/project-mri.git
+cd project-mri
+```
+
+**Python — reproducible (recommended).** `uv` is a dev-time-only tool; it is not
+a runtime dependency of project-mri. `uv.lock` pins the entire dependency graph
+exactly, so every contributor and CI run resolves identically:
+
+```bash
+pip install uv          # or: pipx install uv
+uv sync --extra dev     # creates .venv from uv.lock, exactly
+uv run mri init
+uv run mri serve
+```
+
+**Python — pip fallback.** No uv required. `requirements.txt` is generated from
+`uv.lock` and is fully hash-pinned, so pip verifies every artifact:
+
+```bash
 python3 -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+pip install -r requirements.txt    # exact, hash-verified runtime deps
+pip install -e ".[dev]"            # the package itself + dev tools
 mri init
 mri serve
+```
+
+> Dependency policy: the root `pyproject.toml` declares compatible **ranges** so
+> the published wheel does not over-constrain consumers. Exact reproducibility
+> comes from `uv.lock` (and the `requirements.txt` derived from it). Never edit
+> `requirements.txt` by hand — regenerate it:
+> `uv export --format requirements-txt --no-dev --no-emit-project -o requirements.txt`
+
+**Web apps (site + dashboard):**
+
+```bash
+pnpm install
+pnpm dev:web           # marketing site
+pnpm dev:dashboard     # dashboard
+pnpm build:dashboard   # static export embedded into src/mri/_frontend
 ```
 
 ---
