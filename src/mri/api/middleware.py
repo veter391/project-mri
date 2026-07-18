@@ -1,10 +1,13 @@
 """API middleware: auth, rate limit, security headers, request logging."""
 from __future__ import annotations
 
+import json
 import logging
 import time
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
+from functools import lru_cache
+from importlib.resources import files as _pkg_files
 
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse
@@ -14,6 +17,26 @@ from mri.logging_setup import clear_request_id, set_request_id
 from mri.security import check_api_key, is_auth_enabled, sanitize_for_log
 
 logger = logging.getLogger("mri.middleware")
+
+
+@lru_cache(maxsize=1)
+def _dashboard_script_hashes() -> tuple[str, ...]:
+    """sha256 hashes of the dashboard's inline bootstrap scripts.
+
+    Written by apps/dashboard/scripts/embed.mjs at build time. Empty when the
+    dashboard was never built, in which case the strict policy simply stands.
+    """
+    try:
+        manifest = (
+            _pkg_files("mri")
+            .joinpath("_frontend", "dashboard", "csp-script-hashes.json")
+        )
+        if manifest.is_file():
+            loaded = json.loads(manifest.read_text(encoding="utf-8"))
+            return tuple(h for h in loaded if isinstance(h, str) and h.startswith("sha256-"))
+    except (OSError, ValueError, ModuleNotFoundError, NotADirectoryError):
+        logger.warning("dashboard CSP manifest unreadable; keeping strict script-src")
+    return ()
 
 # Paths that don't require auth (health, openapi, demo data, auth endpoints, dashboard)
 PUBLIC_PATHS = frozenset({
@@ -53,10 +76,19 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         resp.headers.setdefault("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
         # HSTS — only meaningful over HTTPS, but harmless in dev
         resp.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
-        # CSP — restrict to same-origin (we don't load external scripts)
+        # CSP — restrict to same-origin (we don't load external scripts).
+        # The embedded dashboard is a Next.js export that bootstraps through
+        # inline <script> tags. Those are allowed by exact sha256 hash (emitted
+        # at build time by apps/dashboard/scripts/embed.mjs) and only on the
+        # /dashboard path — never 'unsafe-inline', and never for the API.
+        script_src = "'self'"
+        if request.url.path.startswith("/dashboard"):
+            hashes = _dashboard_script_hashes()
+            if hashes:
+                script_src += " " + " ".join(f"'{h}'" for h in hashes)
         csp = (
             "default-src 'self'; "
-            "script-src 'self'; "
+            f"script-src {script_src}; "
             "style-src 'self' 'unsafe-inline'; "
             "img-src 'self' data:; "
             "font-src 'self' https://fonts.gstatic.com; "
