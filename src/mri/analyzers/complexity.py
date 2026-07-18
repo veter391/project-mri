@@ -13,25 +13,13 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
-from functools import lru_cache
 from pathlib import Path
 from statistics import median
 from typing import Any
 
 from mri.analyzers.base import BaseAnalyzer, ScanContext
-
-try:
-    from tree_sitter_language_pack import get_parser  # type: ignore
-    _HAS_TS = True
-except Exception:  # pragma: no cover
-    _HAS_TS = False
-
-
-# Cache tree-sitter parsers — get_parser() is expensive per-file
-@lru_cache(maxsize=8)
-def _cached_parser(lang: str):
-    return get_parser(lang) if _HAS_TS else None
-
+from mri.analyzers.parsing import HAS_TREE_SITTER as _HAS_TS
+from mri.analyzers.parsing import language_for_extension
 
 # Python comment regex (matches `# ...` after start-of-line whitespace)
 _PY_COMMENT = re.compile(r"^\s*#.*$", re.MULTILINE)
@@ -75,17 +63,14 @@ class ComplexityAnalyzer(BaseAnalyzer):
 
                 # Function-level scan if tree-sitter available
                 if _HAS_TS:
-                    ext = Path(rel).suffix.lower()
-                    ts_lang = self._ext_to_ts(ext)
+                    ts_lang = language_for_extension(Path(rel).suffix)
                     if ts_lang:
                         try:
-                            content = (Path(ctx.project_path) / rel).read_text(
-                                encoding="utf-8", errors="ignore"
-                            )
-                            if content and len(content) < 2_000_000:
-                                parser = _cached_parser(ts_lang)
-                                if parser is not None:
-                                    tree = parser.parse(content.encode("utf-8"))
+                            # Shared with the other analyzers: read once, parse once.
+                            content = ctx.read_text(rel)
+                            if content:
+                                tree = ctx.parse_tree(rel, ts_lang)
+                                if tree is not None:
                                     fns = self._collect_functions(
                                         tree.root_node, content.encode("utf-8")
                                     )
@@ -193,25 +178,6 @@ class ComplexityAnalyzer(BaseAnalyzer):
             self._finish_err(f"{type(exc).__name__}: {exc}")
             raise
 
-    @staticmethod
-    def _ext_to_ts(ext: str) -> str | None:
-        return {
-            ".py": "python",
-            ".js": "javascript",
-            ".mjs": "javascript",
-            ".cjs": "javascript",
-            ".ts": "typescript",
-            ".tsx": "tsx",
-            ".go": "go",
-            ".rs": "rust",
-            ".java": "java",
-            ".c": "c",
-            ".h": "c",
-            ".cpp": "cpp",
-            ".cc": "cpp",
-            ".hpp": "cpp",
-            ".rb": "ruby",
-        }.get(ext)
 
     @staticmethod
     def _collect_functions(node: Any, content: bytes) -> list[tuple[str, int, int]]:

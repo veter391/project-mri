@@ -15,6 +15,7 @@ from collections import defaultdict
 from pathlib import Path
 
 from mri.analyzers.base import BaseAnalyzer, ScanContext
+from mri.analyzers.parsing import extract_imports
 
 
 class CouplingAnalyzer(BaseAnalyzer):
@@ -36,16 +37,16 @@ class CouplingAnalyzer(BaseAnalyzer):
                 src = self._module_of(rel)
                 all_modules.add(src)
 
-            # Quick: re-scan imports via the dependencies module's helpers
-            from mri.analyzers.dependencies import DependenciesAnalyzer
-            da = DependenciesAnalyzer()
+            # Import extraction is shared with the dependencies analyzer and the
+            # ASTs come from the scan context, so this pass reuses the trees that
+            # analyzer already built instead of parsing the corpus a second time.
             for f in ctx.files:
                 rel = f.get("rel_path", "")
-                content = self._safe_read(Path(ctx.project_path) / rel)
+                content = ctx.read_text(rel)
                 if content is None:
                     continue
                 src_module = self._module_of(rel)
-                imports = da._extract_imports(rel, content)
+                imports = extract_imports(ctx, rel, content)
                 for imp in imports:
                     imp_module = self._module_of(imp)
                     if imp_module and imp_module != src_module:

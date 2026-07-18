@@ -10,26 +10,11 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
-from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 from mri.analyzers.base import BaseAnalyzer, ScanContext
-
-# Try tree-sitter gracefully — fall back to regex for unsupported langs
-try:
-    from tree_sitter_language_pack import get_parser  # type: ignore
-    _HAS_TS = True
-except Exception:  # pragma: no cover
-    _HAS_TS = False
-
-
-# Cache tree-sitter parsers — get_parser() is expensive and we call it
-# once per file. LRU cache keeps the last 8 language parsers alive.
-@lru_cache(maxsize=8)
-def _cached_parser(lang: str):
-    return get_parser(lang) if _HAS_TS else None
-
+from mri.analyzers.parsing import extract_imports
 
 # Regex fallback for Python (most common)
 _PY_IMPORT = re.compile(
@@ -72,10 +57,10 @@ class DependenciesAnalyzer(BaseAnalyzer):
                 rel = f.get("rel_path", "")
                 src_module = self._module_of(rel)
                 all_modules.add(src_module)
-                content = self._safe_read(Path(ctx.project_path) / rel)
+                content = ctx.read_text(rel)
                 if content is None:
                     continue
-                imports = self._extract_imports(rel, content)
+                imports = extract_imports(ctx, rel, content)
                 for imp in imports:
                     imp_module = self._module_of(imp)
                     if imp_module and imp_module != src_module:
@@ -182,82 +167,8 @@ class DependenciesAnalyzer(BaseAnalyzer):
         # Strip only the file's extension, keep all parent dirs
         return str(p.with_suffix("")).replace("\\", "/")
 
-    def _safe_read(self, path: Path) -> str | None:
-        try:
-            if path.stat().st_size > 2_000_000:  # skip >2MB files
-                return None
-            return path.read_text(encoding="utf-8", errors="ignore")
-        except Exception:
-            return None
 
-    def _extract_imports(self, path: str, content: str) -> list[str]:
-        """Return a list of import paths (strings, possibly relative)."""
-        suffix = Path(path).suffix.lower()
-        imports: list[str] = []
 
-        # Try tree-sitter first for known langs
-        lang_name = None
-        if suffix == ".py":
-            lang_name = "python"
-        elif suffix in (".js", ".mjs", ".cjs"):
-            lang_name = "javascript"
-        elif suffix in (".ts",):
-            lang_name = "typescript"
-        elif suffix in (".tsx",):
-            lang_name = "tsx"
-        elif suffix == ".go":
-            lang_name = "go"
-
-        if _HAS_TS and lang_name and lang_name in self.LANG_TS.values():
-            try:
-                parser = _cached_parser(lang_name)
-                if parser is not None:
-                    tree = parser.parse(content.encode("utf-8"))
-                    imports = self._ts_walk(tree.root_node, content)
-                    if imports:
-                        return imports
-            except Exception:  # nosec  # tree-sitter can fail on malformed input
-                pass  # fall back to regex
-
-        # Regex fallback
-        if suffix == ".py":
-            for m in _PY_IMPORT.finditer(content):
-                mod = m.group(1) or m.group(2)
-                if mod:
-                    imports.append(mod.replace(".", "/") + ".py")
-        elif suffix in (".js", ".ts", ".tsx", ".mjs", ".cjs"):
-            for m in _JS_IMPORT.finditer(content):
-                mod = m.group(1) or m.group(2) or m.group(3)
-                if mod and mod.startswith("."):
-                    imports.append(mod)
-        return imports
-
-    def _ts_walk(self, root: Any, content: str) -> list[str]:
-        """Extract import strings from a tree-sitter AST — iterative.
-
-        Recursive version hit Python's recursion limit on deeply nested code.
-        Using an explicit stack avoids that and uses less memory.
-        """
-        imports: list[str] = []
-        # We only look at top-level import_statement / import_declaration
-        # nodes — no need to walk into function bodies.
-        stack: list[Any] = [root]
-        quote_re = re.compile(r"""['"]([^'"]+)['"]""")
-        while stack:
-            node = stack.pop()
-            if node.type in ("import_statement", "import_declaration"):
-                text = content[node.start_byte:node.end_byte]
-                for m in quote_re.finditer(text):
-                    imports.append(m.group(1))
-            else:
-                # Only descend into top-level scope (children of root or module)
-                if node.type in ("module", "program", "source_file", "compilation_unit"):
-                    stack.extend(node.children)
-                elif node.parent is None or node.parent.type in (
-                    "module", "program", "source_file", "compilation_unit"
-                ):
-                    stack.extend(node.children)
-        return imports
 
     def _find_cycles(self, edges: dict[str, set[str]], all_modules: set[str]) -> list[list[str]]:
         """Iterative Tarjan's SCC — returns non-trivial SCCs as cycles.

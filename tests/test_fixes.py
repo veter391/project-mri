@@ -85,13 +85,15 @@ def test_find_cycles_no_recursion_error_on_deep_chain():
 def test_ts_walk_handles_deeply_nested_ast():
     """The old recursive _ts_walk hit recursion limit on deep JSX/TSX."""
     import tree_sitter_language_pack
+
+    from mri.analyzers.parsing import walk_imports
+
     parser = tree_sitter_language_pack.get_parser("python")
-    a = DependenciesAnalyzer()
     # 5,000 levels of nested parens — parser creates a deep AST
     code = "x = " + "(" * 5000 + "1" + ")" * 5000
     tree = parser.parse(code.encode("utf-8"))
     # Must not raise RecursionError
-    imports = a._ts_walk(tree.root_node, code)
+    imports = walk_imports(tree.root_node, code)
     assert isinstance(imports, list)
 
 
@@ -101,11 +103,11 @@ def test_ts_walk_handles_deeply_nested_ast():
 
 def test_get_parser_is_cached():
     """The same language parser instance should be reused."""
-    from mri.analyzers.dependencies import _cached_parser
+    from mri.analyzers.parsing import get_parser_for
     # Clear the cache
-    _cached_parser.cache_clear()
-    p1 = _cached_parser("python")
-    p2 = _cached_parser("python")
+    get_parser_for.cache_clear()
+    p1 = get_parser_for("python")
+    p2 = get_parser_for("python")
     assert p1 is p2, "parser should be cached"
 
 

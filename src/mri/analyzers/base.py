@@ -8,10 +8,10 @@ Every analyzer is a small async unit that:
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 from mri.models.scan import AnalyzerRun, Finding, ScanStatus, Score
 
@@ -31,12 +31,79 @@ class ScanContext:
     include_globs: list[str] | None = None
     exclude_globs: list[str] | None = None
 
+    # Shared caches. The analyzers each used to read and parse the same files:
+    # measured at five read passes and three tree-sitter parses over the corpus.
+    # Both are bounded — retaining every file and every AST on a large repository
+    # would be a memory problem, so past the budget content is still returned,
+    # just not retained.
+    _content: dict[str, str] = field(default_factory=dict, repr=False)
+    _trees: dict[tuple[str, str], Any] = field(default_factory=dict, repr=False)
+    _content_bytes: int = field(default=0, repr=False)
+    _tree_count: int = field(default=0, repr=False)
+
+    #: Stop retaining file contents past this many characters.
+    CONTENT_BUDGET_CHARS: ClassVar[int] = 64 * 1024 * 1024
+    #: Stop retaining parsed trees past this many files.
+    TREE_BUDGET_FILES: ClassVar[int] = 5_000
+    #: Files larger than this are never read whole.
+    MAX_FILE_BYTES: ClassVar[int] = 2 * 1024 * 1024
+
     def is_excluded(self, path: str) -> bool:
         from fnmatch import fnmatch
 
         if self.exclude_globs:
             return any(fnmatch(path, g) for g in self.exclude_globs)
         return False
+
+    def read_text(self, rel_path: str) -> str | None:
+        """Read a source file once and share it with every analyzer.
+
+        Returns None when the file is unreadable or larger than
+        ``MAX_FILE_BYTES``. The size is checked before reading, so an
+        accidentally committed huge file never lands in memory.
+        """
+        cached = self._content.get(rel_path)
+        if cached is not None:
+            return cached
+        full = self.project_path / rel_path
+        try:
+            if full.stat().st_size > self.MAX_FILE_BYTES:
+                return None
+            text = full.read_text(encoding="utf-8", errors="ignore")
+        except (OSError, ValueError):
+            return None
+        if self._content_bytes + len(text) <= self.CONTENT_BUDGET_CHARS:
+            self._content[rel_path] = text
+            self._content_bytes += len(text)
+        return text
+
+    def parse_tree(self, rel_path: str, ts_language: str) -> Any | None:
+        """Parse a file with tree-sitter once and share the AST.
+
+        Returns None when no parser is available or the file cannot be read, so
+        callers keep their existing "fall back to regex" behaviour.
+        """
+        key = (rel_path, ts_language)
+        cached = self._trees.get(key)
+        if cached is not None:
+            return cached
+        text = self.read_text(rel_path)
+        if text is None:
+            return None
+        from mri.analyzers.parsing import get_parser_for
+
+        parser = get_parser_for(ts_language)
+        if parser is None:
+            return None
+        try:
+            tree = parser.parse(text.encode("utf-8"))
+        except Exception:
+            # Malformed source is expected; the caller falls back to regex.
+            return None
+        if self._tree_count < self.TREE_BUDGET_FILES:
+            self._trees[key] = tree
+            self._tree_count += 1
+        return tree
 
 
 class BaseAnalyzer(ABC):
