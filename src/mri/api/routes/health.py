@@ -11,6 +11,7 @@ import time
 
 from fastapi import APIRouter, Response, status
 
+from mri import __version__ as _VERSION
 from mri.api.deps import get_db_path
 from mri.db.repository import get_connection
 from mri.models.scan import HealthResponse
@@ -18,7 +19,6 @@ from mri.models.scan import HealthResponse
 logger = logging.getLogger("mri.health")
 router = APIRouter(prefix="/api", tags=["system"])
 
-_VERSION = "0.3.0"
 _STARTED_AT = time.time()
 
 
@@ -92,9 +92,14 @@ async def health_deep(response: Response) -> dict:
         checks["tree_sitter"] = {"ok": False, "error": str(e)[:200]}
         overall_ok = False
 
-    # 4. GitPython available
+    # 4. git actually usable. Importing GitPython proves nothing — it shells out
+    # to the git binary, so the binary is what has to be probed. This check used
+    # to be an empty try block that could not fail, and therefore reported
+    # healthy on machines with no git at all.
     try:
-        checks["git"] = {"ok": True}
+        from git import Git
+
+        checks["git"] = {"ok": True, "version": ".".join(map(str, Git().version_info))}
     except Exception as e:
         checks["git"] = {"ok": False, "error": str(e)[:200]}
         overall_ok = False

@@ -93,24 +93,48 @@ class TextFormatter(logging.Formatter):
         return f"{time.strftime('%H:%M:%S', time.gmtime(record.created))} [{record.levelname}] {prefix}{record.name}: {record.getMessage()}"
 
 
-_LOG_FORMAT = os.environ.get("MRI_LOG_FORMAT", "json").lower()
-_LOG_LEVEL = os.environ.get("MRI_LOG_LEVEL", "INFO").upper()
+def _resolve(env_var: str, config_key: str, fallback: str) -> str:
+    """Environment first, then `server.<key>` from the config file, then default.
+
+    Both keys are written into every user's config.yml and documented as
+    configurable, but nothing read them — editing them silently did nothing.
+    Environment keeps precedence so a container override still wins.
+    """
+    from_env = os.environ.get(env_var)
+    if from_env:
+        return from_env
+    try:
+        from mri.config import get_config
+
+        value = (get_config().get("server") or {}).get(config_key)
+        if isinstance(value, str) and value:
+            return value
+    except Exception as exc:
+        # A broken config must never stop logging from starting, but it must not
+        # disappear either — this goes to stderr because the handler that would
+        # carry it is exactly what is being configured.
+        print(f"mri: could not read server.{config_key} from config ({exc}); using {fallback}",
+              file=sys.stderr)
+    return fallback
 
 
 def setup_logging() -> None:
     """Configure the root logger. Idempotent."""
+    log_format = _resolve("MRI_LOG_FORMAT", "log_format", "json").lower()
+    log_level = _resolve("MRI_LOG_LEVEL", "log_level", "INFO").upper()
+
     root = logging.getLogger()
     # Remove existing handlers (uvicorn installs its own — replace them too)
     for h in list(root.handlers):
         root.removeHandler(h)
 
     handler = logging.StreamHandler(sys.stdout)
-    if _LOG_FORMAT == "text":
+    if log_format == "text":
         handler.setFormatter(TextFormatter())
     else:
         handler.setFormatter(JsonFormatter())
     root.addHandler(handler)
-    root.setLevel(getattr(logging, _LOG_LEVEL, logging.INFO))
+    root.setLevel(getattr(logging, log_level, logging.INFO))
 
     # Quiet down noisy libraries
     logging.getLogger("multipart.multipart").setLevel(logging.WARNING)

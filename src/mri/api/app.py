@@ -20,6 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from mri import __version__
 from mri.api.metrics_routes import router as metrics_router
 from mri.api.middleware import (
     AuthMiddleware,
@@ -35,7 +36,6 @@ from mri.auth import router as auth_router
 from mri.logging_setup import setup_logging
 from mri.security import get_cors_origins, get_max_request_bytes
 
-__version__ = "0.3.0"
 logger = logging.getLogger("mri.app")
 
 

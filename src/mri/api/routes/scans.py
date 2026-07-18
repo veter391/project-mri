@@ -26,6 +26,7 @@ from fastapi import (
 )
 from fastapi.responses import HTMLResponse, Response
 
+from mri import __version__
 from mri.api.deps import db_conn
 from mri.db.repository import (
     create_scan,
@@ -795,7 +796,7 @@ def _to_sarif(report: Report) -> dict:
             "tool": {
                 "driver": {
                     "name": "project-mri",
-                    "version": "0.3.0",
+                    "version": __version__,
                     "informationUri": "https://github.com/project-mri/project-mri",
                     "rules": [
                         {
@@ -837,7 +838,7 @@ def _to_sarif(report: Report) -> dict:
             "tool": {
                 "driver": {
                     "name": "project-mri",
-                    "version": "0.3.0",
+                    "version": __version__,
                     "informationUri": "https://github.com/project-mri/project-mri",
                     "rules": [
                         {
