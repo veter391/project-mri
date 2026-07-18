@@ -317,11 +317,18 @@ def clone_repo(
     # Update existing clone
     if local_path.exists() and (local_path / ".git").exists() and not force_refresh:
         try:
+            # `git fetch` updates refs but never touches the working tree. The
+            # analyzers walk files on disk, so without an explicit checkout a
+            # re-scan would analyse whatever branch happened to be checked out
+            # last while the report claimed the requested one — a silently wrong
+            # answer. FETCH_HEAD is used rather than origin/<branch> because it
+            # is what a shallow fetch reliably sets.
             if branch:
-                # Try to switch branch (may fail if branch doesn't exist locally)
                 _run_git("fetch", "--depth", str(depth or 1), "origin", branch, cwd=local_path)
+                _run_git("checkout", "-B", branch, "FETCH_HEAD", cwd=local_path)
             else:
                 _run_git("fetch", "--depth", str(depth or 1), "origin", cwd=local_path)
+                _run_git("reset", "--hard", "FETCH_HEAD", cwd=local_path)
             _record_clone(url, local_path)
             logger.info(
                 "clone.updated",
@@ -338,7 +345,9 @@ def clone_repo(
     local_path.parent.mkdir(parents=True, exist_ok=True)
 
     auth_url = _build_authenticated_url(repo, config)
-    cmd = ["git", "clone"]
+    # _run_git prepends "git" itself — including it here produced `git git clone`,
+    # which failed every fresh clone.
+    cmd = ["clone"]
     if depth:
         cmd += ["--depth", str(depth)]
     if branch:
@@ -352,7 +361,10 @@ def clone_repo(
             "url": url,
             "host": repo.host,
             "owner": repo.owner,
-            "name": repo.name,
+            # Not "name": that is a reserved LogRecord attribute and logging
+            # raises KeyError when `extra` tries to overwrite it, which turned a
+            # successful clone into a crash whenever INFO logging was enabled.
+            "repo_name": repo.name,
             "branch": branch or "(default)",
             "depth": depth or "(full)",
         },
