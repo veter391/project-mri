@@ -360,28 +360,16 @@ class Scanner:
                     sev = f.severity.value if hasattr(f.severity, "value") else str(f.severity)
                     _metrics.FINDINGS_TOTAL.labels(analyzer=run.name, severity=sev).inc(1)
         from mri.models.scan import Score
+        from mri.scoring import compose_overall
 
         # Weight lookup (independent of analyzer instance — class-level attr)
         weight_map: dict[str, float] = {
             Cls.name: Cls.weight for Cls in Scanner.ANALYZERS
         }
-
-        # Filter to runs with a score
         scored = [r for r in runs if r.score is not None]
-        weighted_pairs = [
-            (r.score.value, weight_map.get(r.name, 1.0)) for r in scored
-        ]
-        total_weight = sum(w for _, w in weighted_pairs) or 1.0
-
-        # Weighted overall health
-        weighted_sum = sum(v * w for v, w in weighted_pairs)
-        overall = weighted_sum / total_weight if weighted_pairs else 50.0
-
-        # Composition ledger
-        composition = [
-            f"{r.score.label} = {r.score.value} (weight {round(weight_map.get(r.name, 1.0) / total_weight, 2)})"
-            for r in scored
-        ]
+        composed = compose_overall(runs, weight_map)
+        overall = composed.value
+        composition = composed.ledger
 
         # Aggregate findings
         findings = []

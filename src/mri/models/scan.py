@@ -83,6 +83,17 @@ class Score(BaseModel):
     label: str = Field(..., description="e.g. architecture_health, debt_index")
     value: float = Field(..., ge=0, le=100)
     band: Literal["excellent", "good", "fair", "poor", "critical"] = "fair"
+    # Shares of this score by provenance, e.g. {"ai": 40.0, "human": 35.0,
+    # "unattributed": 25.0}. Empty until the authorship layer fills it. A share
+    # that cannot be attributed is reported as unattributed, never guessed, and
+    # the shares must sum to 100 when present.
+    decomposition: dict[str, float] = Field(default_factory=dict)
+    # 0..1 confidence in the decomposition. None means no claim is being made,
+    # which is different from a confident zero.
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    # Set when this score is derived from a correlation. Carries the honest
+    # label so a consumer cannot mistake it for a causal claim.
+    causal_claim: Literal["correlation", "causation", "none"] = "none"
     contributors: list[str] = Field(
         default_factory=list,
         description="Human-readable breakdown. Example: 'bus_factor = 4 (-18)'",
