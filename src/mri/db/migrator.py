@@ -27,6 +27,7 @@ import sqlite3
 from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from enum import Enum
 from importlib.resources import files as _pkg_files
 from pathlib import Path
 
@@ -37,6 +38,22 @@ __all__ = ["MigrationError", "applied_migrations", "migrate", "pending_migration
 # module", which must be stamped rather than re-created.
 _BASELINE_MARKER_TABLES = ("scans", "projects", "analyzer_runs")
 _BASELINE_MIGRATION = "0001_initial_schema.sql"
+
+# Every table the v0.3.x schema shipped. A database is only accepted as
+# "pre-migrations" — and therefore stamped rather than built — if it has all of
+# them with the columns below.
+_BASELINE_REQUIRED_TABLES = frozenset({
+    "projects", "scans", "analyzer_runs", "findings", "scan_events",
+    "users", "app_settings", "cloned_repos", "webhook_deliveries",
+})
+_BASELINE_REQUIRED_COLUMNS: dict[str, frozenset[str]] = {
+    "projects": frozenset({"id", "path", "name"}),
+    "scans": frozenset({"id", "project_id", "scan_uuid", "status", "summary_json"}),
+    "analyzer_runs": frozenset({"id", "scan_id", "analyzer_name", "status"}),
+    "findings": frozenset({"id", "severity", "category"}),
+    "users": frozenset({"id", "username", "password_hash"}),
+    "app_settings": frozenset({"key", "value"}),
+}
 
 _LOCK_TIMEOUT_MS = 15_000
 
@@ -107,13 +124,33 @@ def _applied(conn: sqlite3.Connection) -> set[str]:
     return {r[0] for r in rows}
 
 
-def _looks_like_pre_migrations_db(conn: sqlite3.Connection) -> bool:
-    """True if the database predates this module: it has the v0.3.x tables but
-    no record of ever applying a migration."""
+class _Baseline(Enum):
+    """How an untracked database relates to the v0.3.x schema."""
+
+    ABSENT = "absent"      # brand new — build it
+    COMPLETE = "complete"  # genuine v0.3.x — stamp it
+    PARTIAL = "partial"    # has some of it, wrong shape — refuse
+
+
+def _baseline_state(conn: sqlite3.Connection) -> _Baseline:
+    """Classify a database that has no migration history yet."""
     existing = {
         row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
     }
-    return set(_BASELINE_MARKER_TABLES) <= existing
+    if not existing & set(_BASELINE_REQUIRED_TABLES):
+        return _Baseline.ABSENT
+    # Table names alone are not enough. A database restored from an untrusted
+    # backup, or corrupted, can carry three tables with those names and nothing
+    # else — stamping it would skip the baseline and leave the install without
+    # `users`, `findings` and the rest, failing at runtime instead of at setup.
+    # Require the full shape before accepting it as a genuine v0.3.x database.
+    if not _BASELINE_REQUIRED_TABLES <= existing:
+        return _Baseline.PARTIAL
+    for table, required_columns in _BASELINE_REQUIRED_COLUMNS.items():
+        present = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+        if not required_columns <= present:
+            return _Baseline.PARTIAL
+    return _Baseline.COMPLETE
 
 
 def applied_migrations(db_path: Path) -> set[str]:
@@ -157,11 +194,28 @@ def migrate(db_path: Path) -> list[str]:
                 if migration.name in _applied(conn):
                     conn.execute("COMMIT")
                     continue
-                if migration.name == _BASELINE_MIGRATION and _looks_like_pre_migrations_db(conn):
-                    # The objects already exist from v0.3.x — record, don't re-run.
-                    _record(conn, migration.name)
-                    conn.execute("COMMIT")
-                    continue
+                if migration.name == _BASELINE_MIGRATION:
+                    state = _baseline_state(conn)
+                    if state is _Baseline.COMPLETE:
+                        # The objects already exist from v0.3.x — record, don't re-run.
+                        _record(conn, migration.name)
+                        conn.execute("COMMIT")
+                        continue
+                    if state is _Baseline.PARTIAL:
+                        # Some baseline tables exist but the shape is wrong, and
+                        # nothing records a migration. Running the baseline would
+                        # no-op on the existing tables (CREATE TABLE IF NOT
+                        # EXISTS) and then fail on an index over a column that is
+                        # not there. Refuse with something the user can act on
+                        # instead of a bare SQL error. The rollback belongs to
+                        # the handler below; doing it here as well raised
+                        # "no transaction is active" and masked this message.
+                        raise MigrationError(
+                            "this database has some project-mri tables but does not match any "
+                            "known schema, and carries no migration history. It was most likely "
+                            "restored from a damaged or foreign backup. Restore a valid backup, "
+                            "or move it aside and let a fresh database be created."
+                        )
 
                 for statement in _statements(migration.sql):
                     conn.execute(statement)

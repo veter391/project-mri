@@ -99,7 +99,11 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             "style-src 'self' 'unsafe-inline'; "
             "img-src 'self' data:; "
             "font-src 'self' https://fonts.gstatic.com; "
-            "connect-src 'self' ws: wss:; "
+            # Same-origin only. `ws:`/`wss:` are scheme sources: they would have
+            # allowed a WebSocket to *any* host, widening the blast radius of any
+            # future injection. The dashboard only ever talks to its own origin,
+            # and 'self' already covers same-origin ws:// and wss://.
+            "connect-src 'self'; "
             "object-src 'none'; "
             "frame-ancestors 'none'; "
             "base-uri 'self'; "
@@ -256,6 +260,13 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         # without bound, so stale keys are swept once per window.
         self._last_sweep = time.time()
 
+    #: Hard ceiling on tracked addresses per bucket. Per-IP limiting is
+    #: inherently evadable by rotating source addresses — an IPv6 /64 alone
+    #: offers more addresses than there are seconds in the universe — so the
+    #: goal here is not to stop that but to stop it costing unbounded memory,
+    #: and to keep the sweep from growing into a long inline scan.
+    MAX_TRACKED_IPS = 10_000
+
     def _sweep_expired(self, now: float, window: float) -> None:
         """Drop IP keys with nothing inside the window. Runs once per window."""
         if now - self._last_sweep < window:
@@ -264,6 +275,14 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         for bucket in (self._hits, self._scans):
             for ip in [k for k, v in bucket.items() if not any(now - t < window for t in v)]:
                 del bucket[ip]
+
+    def _enforce_capacity(self, bucket: dict[str, list[float]]) -> None:
+        """Bound the tracked-address count, oldest activity evicted first."""
+        if len(bucket) <= self.MAX_TRACKED_IPS:
+            return
+        overflow = len(bucket) - self.MAX_TRACKED_IPS
+        for ip, _ in sorted(bucket.items(), key=lambda kv: max(kv[1], default=0.0))[:overflow]:
+            del bucket[ip]
 
     async def dispatch(self, request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
         client = request.client
@@ -285,6 +304,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         # Drop expired entries for this address; the sweep above removes keys
         # for addresses that stopped calling entirely.
         bucket[ip] = [t for t in bucket.get(ip, ()) if now - t < window]
+        self._enforce_capacity(bucket)
         if len(bucket[ip]) >= limit:
             retry_after = max(1, int(window - (now - bucket[ip][0])))
             logger.warning(

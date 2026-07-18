@@ -247,6 +247,14 @@ class Scanner:
                 if ext not in SOURCE_EXTS:
                     continue
                 child = Path(dirpath) / filename
+                # Never follow a symlinked file. `os.walk` declines to descend
+                # into symlinked *directories*, but a symlinked file still shows
+                # up here, and `stat`/`open` would read whatever it points at.
+                # This tool scans untrusted repositories on request, and git
+                # stores symlinks as ordinary blobs — so `notes.py -> /etc/passwd`
+                # is something an attacker can simply commit.
+                if child.is_symlink():
+                    continue
                 rel = os.path.relpath(child, root)
                 # Parity with the previous filter, which also matched a file
                 # whose own name equals an excluded directory name.

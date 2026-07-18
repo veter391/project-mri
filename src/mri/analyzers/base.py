@@ -83,9 +83,19 @@ class ScanContext:
             return cached
         full = self.project_path / rel_path
         try:
-            if full.stat().st_size > self.MAX_FILE_BYTES:
+            # Containment check. The walk already refuses symlinked files, but
+            # this is the single door every analyzer reads through, so it
+            # verifies for itself rather than trusting the caller: a scanned
+            # repository is untrusted input, and git stores a symlink as an
+            # ordinary blob, so `notes.py -> /etc/passwd` is committable.
+            if full.is_symlink():
                 return None
-            text = full.read_text(encoding="utf-8", errors="ignore")
+            resolved = full.resolve()
+            if not resolved.is_relative_to(self.project_path.resolve()):
+                return None
+            if resolved.stat().st_size > self.MAX_FILE_BYTES:
+                return None
+            text = resolved.read_text(encoding="utf-8", errors="ignore")
         except (OSError, ValueError):
             return None
         if self._content_bytes + len(text) <= self.CONTENT_BUDGET_CHARS:

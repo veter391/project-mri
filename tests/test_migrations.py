@@ -149,3 +149,42 @@ def test_statement_splitter_matches_the_baseline_objects():
     assert sum("CREATE TABLE" in s.upper() for s in statements) == 9
     assert sum("CREATE INDEX" in s.upper() for s in statements) == 13
     assert len(statements) == 22
+
+
+def test_a_partial_database_is_not_mistaken_for_a_v030_one(db: Path):
+    """`mri restore` accepts a user-supplied .tar.gz and moves the database
+    inside it into place. A file carrying only the three marker tables must not
+    be stamped as pre-migrations — that would skip the baseline and leave the
+    install without users, findings and the rest, failing at runtime instead of
+    at setup."""
+    conn = sqlite3.connect(db)
+    try:
+        conn.executescript(
+            "CREATE TABLE scans (id INTEGER PRIMARY KEY);"
+            "CREATE TABLE projects (id INTEGER PRIMARY KEY);"
+            "CREATE TABLE analyzer_runs (id INTEGER PRIMARY KEY);"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    # Refused with something the user can act on, rather than stamped into a
+    # half-schema install or crashing with a bare SQL error.
+    with pytest.raises(MigrationError, match="does not match any known schema"):
+        migrate(db)
+    assert applied_migrations(db) == set(), "a partial database must not be recorded"
+
+
+def test_a_genuine_v030_database_is_still_stamped(db: Path):
+    """The real upgrade path must keep working: a complete v0.3.x database is
+    recorded, not rebuilt, and its data survives."""
+    conn = sqlite3.connect(db)
+    try:
+        conn.executescript(_baseline_sql())
+        conn.execute("INSERT INTO projects (name, path) VALUES ('legacy', '/tmp/legacy')")
+        conn.commit()
+    finally:
+        conn.close()
+
+    assert migrate(db) == []
+    assert applied_migrations(db) == {BASELINE}
