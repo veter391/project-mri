@@ -278,9 +278,12 @@ async def list_projects(conn: aiosqlite.Connection, limit: int = 100) -> list[di
 
 
 async def list_scans(conn: aiosqlite.Connection, limit: int = 100) -> list[dict]:
+    # Explicit columns, never `s.*`: report_json holds the entire report (~100 KB
+    # per scan on a modest repo) and a list view has no use for it.
     cursor = await conn.execute(
         """
-        SELECT s.*, p.name AS project_name, p.path AS project_path
+        SELECT s.scan_uuid, s.status, s.started_at, s.finished_at, s.error_message,
+               s.summary_json, p.name AS project_name, p.path AS project_path
         FROM scans s
         JOIN projects p ON p.id = s.project_id
         ORDER BY s.started_at DESC

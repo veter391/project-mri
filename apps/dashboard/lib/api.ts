@@ -1,5 +1,6 @@
 // Same-origin API client — the dashboard is served by FastAPI at /dashboard,
 // so the API lives at /api on the same origin. JWT is kept in localStorage.
+import type { components } from "./api-types";
 
 const TOKEN_KEY = "mri_token";
 
@@ -35,21 +36,17 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return (await res.json()) as T;
 }
 
-// Shape mirrors GET /api/scans: each row is `scans.*` joined with the project
-// name, plus `summary` parsed from summary_json (holds overall_health once the
-// scan completes). See src/mri/api/routes/scans.py::list_scans.
-export interface Scan {
-  scan_uuid: string;
-  project_name: string;
-  status: string;
-  started_at: string;
-  summary?: { overall_health?: number } | null;
-}
+// Types are generated from the API's own OpenAPI schema — never hand-written.
+// Regenerate with `pnpm types:api` from the repo root; CI fails if the checked-in
+// output drifts from the schema.
+export type Scan = components["schemas"]["ScanSummary"];
+export type ScanListResponse = components["schemas"]["ScanListResponse"];
+export type LoginResponse = components["schemas"]["LoginResponse"];
 
 export const login = (username: string, password: string) =>
-  api<{ token: string }>("/auth/login", {
+  api<LoginResponse>("/auth/login", {
     method: "POST",
     body: JSON.stringify({ username, password }),
   });
 
-export const listScans = () => api<{ scans: Scan[]; count: number }>("/scans?limit=20");
+export const listScans = () => api<ScanListResponse>("/scans?limit=20");

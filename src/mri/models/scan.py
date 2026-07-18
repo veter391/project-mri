@@ -192,6 +192,39 @@ class ScanAccepted(BaseModel):
     stream_url: str
 
 
+class ScanListResponse(BaseModel):
+    """Response of GET /api/scans.
+
+    Declared explicitly so the database's column names never become the public
+    API — the endpoint used to return raw SQLite rows, which both leaked the
+    full report blob into a list view and made every schema change a breaking
+    API change.
+    """
+
+    # Required, not defaulted: the endpoint always returns both, and marking
+    # them optional would push a needless null-check into every client.
+    scans: list[ScanSummary]
+    count: int
+
+
+class ProjectSummary(BaseModel):
+    """One project, as listed by GET /api/projects."""
+
+    path: str
+    name: str
+    default_branch: str = "main"
+    first_scanned: datetime | None = None
+    last_scanned: datetime | None = None
+    last_commit: str | None = None
+    file_count: int = 0
+    loc_total: int = 0
+
+
+class ProjectListResponse(BaseModel):
+    projects: list[ProjectSummary]
+    count: int
+
+
 class HealthResponse(BaseModel):
     status: Literal["ok"] = "ok"
     version: str

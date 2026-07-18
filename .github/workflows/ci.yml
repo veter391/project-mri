@@ -95,6 +95,39 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Type-check both apps (tsc)
         run: pnpm -r --if-present typecheck
+
+  # -----------------------------------------------------------------------
+  # API contract — the dashboard's types are generated from the API schema.
+  # If either drifts, regeneration produces a diff and this job fails.
+  # -----------------------------------------------------------------------
+  api-contract:
+    name: API types match the schema
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          pnpm install --frozen-lockfile
+      - name: Regenerate schema and types
+        run: pnpm types:api
+      - name: Fail if the checked-in output is stale
+        run: |
+          if ! git diff --quiet -- openapi.json apps/dashboard/lib/api-types.ts; then
+            echo "::error::openapi.json / api-types.ts are out of date — run 'pnpm types:api' and commit"
+            git diff --stat -- openapi.json apps/dashboard/lib/api-types.ts
+            exit 1
+          fi
+          echo "API types are in sync with the schema"
       - name: Build web (Next.js)
         run: pnpm --filter @mri/web build
       - name: Build dashboard (Next.js static export + embed)

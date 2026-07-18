@@ -422,6 +422,27 @@ def upgrade() -> None:  # nosec B404  # subprocess needed for pip
 
 
 # ---------------------------------------------------------------------------
+# mri openapi — dump the API schema (used to generate typed clients)
+# ---------------------------------------------------------------------------
+
+
+@cli.command()
+@click.option("--output", "-o", default=None, help="Write to this file instead of stdout")
+def openapi(output: str | None) -> None:
+    """Print the OpenAPI schema for the HTTP API."""
+    import json as _json
+
+    from mri.api.app import create_app
+
+    spec = _json.dumps(create_app().openapi(), indent=2, sort_keys=True) + "\n"
+    if output:
+        Path(output).write_text(spec, encoding="utf-8")
+        click.echo(f"✓ wrote {output}", err=True)
+    else:
+        click.echo(spec, nl=False)
+
+
+# ---------------------------------------------------------------------------
 # mri db — inspect and migrate the local database
 # ---------------------------------------------------------------------------
 

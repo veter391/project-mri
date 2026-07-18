@@ -94,7 +94,7 @@ function Login({ onLogin }: { onLogin: () => void }) {
 const BAND = (h?: number) =>
   h == null ? "text-mute" : h >= 75 ? "text-ok" : h >= 50 ? "text-warn" : "text-alert";
 
-const healthOf = (s: Scan) => s.summary?.overall_health;
+const healthOf = (s: Scan) => s.overall_health ?? undefined;
 
 // started_at may be ISO (completed scans) or SQLite "YYYY-MM-DD HH:MM:SS" UTC
 // (pending). Normalize the latter so it doesn't render "Invalid Date".

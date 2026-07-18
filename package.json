@@ -12,6 +12,7 @@
     "dev:dashboard": "pnpm --filter @mri/dashboard dev",
     "build:web": "pnpm --filter @mri/web build",
     "build:dashboard": "pnpm --filter @mri/dashboard build",
+    "types:api": "python -m mri.cli openapi -o openapi.json && pnpm --filter @mri/dashboard types:api",
     "typecheck": "pnpm -r --if-present typecheck"
   },
   "license": "MIT",

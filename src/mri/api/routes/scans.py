@@ -36,10 +36,14 @@ from mri.db.repository import (
     upsert_project,
 )
 from mri.models.scan import (
+    ProjectListResponse,
+    ProjectSummary,
     Report,
     ScanAccepted,
+    ScanListResponse,
     ScanRequest,
     ScanStatus,
+    ScanSummary,
 )
 from mri.security import (
     PathValidationError,
@@ -494,23 +498,52 @@ async def get_scan(scan_uuid: str, conn: aiosqlite.Connection = Depends(db_conn)
 # ---------------------------------------------------------------------------
 
 
-@router.get("/scans")
+@router.get("/scans", response_model=ScanListResponse)
 async def list_scans(
     limit: int = 50,
     conn: aiosqlite.Connection = Depends(db_conn),
-) -> dict:
+) -> ScanListResponse:
     from mri.db.repository import list_scans
 
     if limit < 1 or limit > 500:
         raise HTTPException(400, "limit must be between 1 and 500")
     rows = await list_scans(conn, limit=limit)
-    for r in rows:
-        if r.get("summary_json"):
-            try:
-                r["summary"] = json.loads(r["summary_json"])
-            except (ValueError, TypeError):
-                pass
-    return {"scans": rows, "count": len(rows)}
+    return ScanListResponse(
+        scans=[_to_scan_summary(r) for r in rows],
+        count=len(rows),
+    )
+
+
+def _to_scan_summary(row: dict) -> ScanSummary:
+    """Map a database row onto the public model.
+
+    Deliberately explicit: the summary blob is written by this service, so a
+    malformed one is a bug here rather than user input — but a listing must not
+    500 because one old row failed to parse.
+    """
+    try:
+        summary = json.loads(row.get("summary_json") or "{}")
+    except (ValueError, TypeError):
+        logger.warning(
+            "scan.summary.unparsable",
+            extra={"event": "scan.summary.unparsable", "scan_uuid": row.get("scan_uuid")},
+        )
+        summary = {}
+    return ScanSummary(
+        scan_uuid=row["scan_uuid"],
+        project_name=row["project_name"],
+        project_path=row["project_path"],
+        status=row["status"],
+        started_at=row["started_at"],
+        finished_at=row.get("finished_at"),
+        duration_ms=summary.get("duration_ms"),
+        overall_health=summary.get("overall_health"),
+        overall_band=summary.get("overall_band", "fair"),
+        file_count=summary.get("file_count", 0),
+        loc_total=summary.get("loc_total", 0),
+        commit_count=summary.get("commit_count", 0),
+        finding_counts=summary.get("finding_counts", {}),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -518,17 +551,21 @@ async def list_scans(
 # ---------------------------------------------------------------------------
 
 
-@router.get("/projects")
+@router.get("/projects", response_model=ProjectListResponse)
 async def list_projects(
     limit: int = 50,
     conn: aiosqlite.Connection = Depends(db_conn),
-) -> dict:
+) -> ProjectListResponse:
     from mri.db.repository import list_projects
 
     if limit < 1 or limit > 500:
         raise HTTPException(400, "limit must be between 1 and 500")
     rows = await list_projects(conn, limit=limit)
-    return {"projects": rows, "count": len(rows)}
+    return ProjectListResponse(
+        projects=[ProjectSummary(**{k: r[k] for k in ProjectSummary.model_fields if k in r})
+                  for r in rows],
+        count=len(rows),
+    )
 
 
 # ---------------------------------------------------------------------------
