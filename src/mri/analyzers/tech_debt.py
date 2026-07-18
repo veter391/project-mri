@@ -45,7 +45,7 @@ class TechDebtAnalyzer(BaseAnalyzer):
     # We store it as-is and let the composer invert.
     weight = 1.0
 
-    async def analyze(self, ctx: ScanContext) -> None:  # type: ignore[override]
+    def analyze(self, ctx: ScanContext) -> None:  # type: ignore[override]
         self._start()
         try:
             debt_by_file: dict[str, dict] = defaultdict(lambda: Counter())

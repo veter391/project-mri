@@ -334,3 +334,45 @@ class TestErrorHandling:
         r = noauth_client.get("/api/scans/not-a-uuid")
         # Should be 400, not 500
         assert r.status_code in (400, 422)
+
+# ---------------------------------------------------------------------------
+# Login must not leak whether a username exists, via timing
+# ---------------------------------------------------------------------------
+
+
+class TestLoginTiming:
+    """A failed login took microseconds for an unknown username and ~195 ms for
+    a known one, because the bcrypt check was short-circuited away. That is a
+    username-enumeration oracle regardless of the generic error message."""
+
+    def test_unknown_username_costs_the_same_as_a_wrong_password(self, tmp_path, monkeypatch):
+        import time
+
+        from fastapi.testclient import TestClient
+
+        monkeypatch.setenv("MRI_DB", str(tmp_path / "timing.db"))
+        from mri.auth.users import create_user
+
+        create_user("realuser", "correct-horse-battery")
+
+        from mri.api.app import create_app
+
+        client = TestClient(create_app())
+
+        def attempt(username: str) -> float:
+            start = time.perf_counter()
+            resp = client.post(
+                "/api/auth/login", json={"username": username, "password": "wrong-password"}
+            )
+            assert resp.status_code == 401
+            return time.perf_counter() - start
+
+        known = min(attempt("realuser") for _ in range(3))
+        unknown = min(attempt("ghostuser") for _ in range(3))
+
+        # Both must pay for a bcrypt verification. A short-circuit shows up as
+        # the unknown case being an order of magnitude faster.
+        assert unknown > known / 2, (
+            f"unknown username answered in {unknown * 1000:.0f} ms vs "
+            f"{known * 1000:.0f} ms for a known one — enumeration oracle"
+        )

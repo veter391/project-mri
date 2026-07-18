@@ -38,7 +38,7 @@ class ComplexityAnalyzer(BaseAnalyzer):
     score_label = "complexity_health"
     weight = 1.0
 
-    async def analyze(self, ctx: ScanContext) -> None:  # type: ignore[override]
+    def analyze(self, ctx: ScanContext) -> None:  # type: ignore[override]
         self._start()
         try:
             long_files: list[dict] = []

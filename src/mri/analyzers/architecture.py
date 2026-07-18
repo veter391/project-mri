@@ -24,7 +24,7 @@ class ArchitectureAnalyzer(BaseAnalyzer):
     MAX_HEALTHY_DEPTH = 4
     GOD_MODULE_LOC = 5000
 
-    async def analyze(self, ctx: ScanContext) -> None:  # type: ignore[override]
+    def analyze(self, ctx: ScanContext) -> None:  # type: ignore[override]
         self._start()
         try:
             # Group files by top-level directory

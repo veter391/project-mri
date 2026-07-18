@@ -24,7 +24,7 @@ class CouplingAnalyzer(BaseAnalyzer):
     score_label = "coupling_health"
     weight = 0.9
 
-    async def analyze(self, ctx: ScanContext) -> None:  # type: ignore[override]
+    def analyze(self, ctx: ScanContext) -> None:  # type: ignore[override]
         self._start()
         try:
             # Reuse the dependency analyzer's edges via signals isn't trivial — re-derive.

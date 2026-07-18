@@ -119,8 +119,14 @@ class BaseAnalyzer(ABC):
         self.run = AnalyzerRun(name=self.name)
 
     @abstractmethod
-    async def analyze(self, ctx: ScanContext) -> AnalyzerRun:
-        """Run the analyzer. Mutates self.run and returns it."""
+    def analyze(self, ctx: ScanContext) -> AnalyzerRun:
+        """Run the analyzer. Mutates self.run and returns it.
+
+        Deliberately synchronous. These are CPU- and IO-bound passes with no
+        await points; declaring them async made `gather` look like concurrency
+        while actually running them back to back and pinning the event loop for
+        the whole scan. The scanner dispatches each one with `asyncio.to_thread`.
+        """
         ...
 
     # Convenience helpers --------------------------------------------------

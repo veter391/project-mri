@@ -161,13 +161,18 @@ class Scanner:
             exclude_globs=opts.exclude_globs,
         )
 
-        # NOTE: `gather` below buys no concurrency today. Every analyzer is
-        # `async def` but contains no await points, so each one runs to
-        # completion before the next starts — measured: gather 5,860 ms vs a
-        # sequential sum of 5,876 ms. It also blocks the event loop for the whole
-        # scan, so the API stops responding while one runs. Fixing that means
-        # making the analyzers synchronous and dispatching them with
-        # `asyncio.to_thread`, which is part of the pipeline rework.
+        # Analyzers run one at a time, each on a worker thread.
+        #
+        # They used to be `async def` gathered together, which looked concurrent
+        # but was not: with no await points inside them, gather ran them back to
+        # back (measured 5,860 ms gathered vs 5,876 ms sequential) while pinning
+        # the event loop for the entire scan — the API stopped answering and
+        # WebSocket progress stopped ticking.
+        #
+        # They stay sequential rather than parallel for two reasons: they are
+        # CPU-bound, so the GIL means threads buy no throughput, and they share
+        # the context's content/AST cache, which sequential access keeps free of
+        # races. The win here is responsiveness, not speed.
         async def run_one(Cls: type, i: int) -> Any:
             pct = 15 + (i * 75 / len(self.ANALYZERS))
             analyzer = Cls()
@@ -177,22 +182,18 @@ class Scanner:
                 pct,
             )
             try:
-                await analyzer.analyze(ctx)
+                await asyncio.to_thread(analyzer.analyze, ctx)
             except Exception as exc:
                 # analyzers handle their own errors; this catches structural ones
                 analyzer._finish_err(f"unhandled: {type(exc).__name__}: {exc}")
             return analyzer.run
 
-        # Run all analyzers concurrently with gather — fail-soft via return_exceptions.
         # ACTIVE_SCANS is incremented here and decremented in finally so the gauge
         # is correct on every entry path (API + CLI) and never leaks on error.
         from mri import metrics as _metrics
         _metrics.ACTIVE_SCANS.inc()
         try:
-            runs = await asyncio.gather(
-                *[run_one(Cls, i) for i, Cls in enumerate(self.ANALYZERS)],
-                return_exceptions=False,
-            )
+            runs = [await run_one(Cls, i) for i, Cls in enumerate(self.ANALYZERS)]
 
             # Compose report
             await self._emit("compose", "scoring", 92)

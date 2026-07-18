@@ -46,7 +46,7 @@ class DependenciesAnalyzer(BaseAnalyzer):
         "ruby": "ruby",
     }
 
-    async def analyze(self, ctx: ScanContext) -> None:  # type: ignore[override]
+    def analyze(self, ctx: ScanContext) -> None:  # type: ignore[override]
         self._start()
         try:
             # Build module graph: source_module -> set(imported_module)

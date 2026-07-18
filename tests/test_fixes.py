@@ -138,7 +138,7 @@ async def test_tech_debt_no_dead_computation(tmp: Path):
     }
     ctx = _make_ctx(tmp, files)
     a = TechDebtAnalyzer()
-    await a.analyze(ctx)
+    a.analyze(ctx)
     # Sanity: real findings present
     assert a.run.score is not None
     debt_findings = [f for f in a.run.findings if f.category.startswith("debt_")]
@@ -193,7 +193,7 @@ async def test_complexity_excludes_comments_from_code(tmp: Path):
     ctx = _make_ctx(tmp, files)
     from mri.analyzers.complexity import ComplexityAnalyzer
     a = ComplexityAnalyzer()
-    await a.analyze(ctx)
+    a.analyze(ctx)
     # comment_ratio should be ~0.5 (50 of 100 lines are comments)
     ratio = a.run.signals["comment_ratio"]
     assert 0.4 < ratio < 0.6, f"comment_ratio={ratio} — comments not being excluded"
@@ -208,7 +208,7 @@ async def test_comment_ratio_is_null_when_parser_absent(tmp: Path, monkeypatch):
     monkeypatch.setattr(cx, "_HAS_TS", False)
     ctx = _make_ctx(tmp, {"a.py": "\n".join(["# c"] * 10 + ["x = 1"] * 10)})
     a = cx.ComplexityAnalyzer()
-    await a.analyze(ctx)
+    a.analyze(ctx)
     assert a.run.signals["comment_ratio"] is None
 
 

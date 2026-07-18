@@ -6,6 +6,7 @@ with the same DB, so it has direct access).
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
@@ -122,21 +123,39 @@ def require_user(
 # ---------------------------------------------------------------------------
 
 
+# A bcrypt hash of a random throwaway value, at the same cost as real hashes.
+# Verified against when the username is unknown, so login takes the same time
+# whether or not the account exists. Not a secret and not a usable credential.
+_ENUMERATION_GUARD_HASH = "$2b$12$wdS/fZRSjLLsPaX2fgNkUOVYYYlHiaa2JlEM4QxoMVMMstyK7Bm1G"
+
+
 @router.post("/login", response_model=LoginResponse)
 async def login(req: LoginRequest, response: Response) -> LoginResponse:
     """Authenticate with username + password, get a JWT."""
-    user = get_user_by_username(req.username)
-    if user is None or not verify_password(req.password, user["password_hash"]):
+    # bcrypt at cost 12 is ~195 ms of deliberate CPU, and each of these helpers
+    # also opens SQLite synchronously. Run on a worker thread: otherwise one
+    # login freezes every other request and WebSocket on the server for the
+    # duration.
+    user = await asyncio.to_thread(get_user_by_username, req.username)
+    # Always run a verification, even for an unknown username. Short-circuiting
+    # returned in microseconds for a user that does not exist and ~195 ms for one
+    # that does, which is a timing oracle for username enumeration — exactly what
+    # the generic error message below is meant to prevent.
+    stored_hash = user["password_hash"] if user is not None else _ENUMERATION_GUARD_HASH
+    password_ok = await asyncio.to_thread(verify_password, req.password, stored_hash)
+    if user is None or not password_ok:
         logger.info(
             "auth.login.failed",
             extra={"event": "auth.login.failed", "username": sanitize_for_log(req.username)},
         )
         # Generic error to avoid username enumeration
         raise HTTPException(status_code=401, detail="Invalid username or password")
-    record_login(user["id"])
+    await asyncio.to_thread(record_login, user["id"])
     cfg = get_config().get("auth", {})
     ttl = int(cfg.get("jwt_ttl_seconds", 86400))
-    token = create_token(user["id"], user["username"], ttl_seconds=ttl)
+    token = await asyncio.to_thread(
+        create_token, user["id"], user["username"], ttl_seconds=ttl
+    )
     cookie_name = cfg.get("session_cookie_name", "mri_session")
     response.set_cookie(
         key=cookie_name,
@@ -189,12 +208,16 @@ async def change_password(
     """Change the current user's password."""
     if user.get("legacy"):
         raise HTTPException(403, "Cannot change password for legacy API key user")
-    full = get_user_by_id(user["id"])
-    if full is None or not verify_password(req.current_password, full["password_hash"]):
+    # Same reasoning as login: bcrypt plus a synchronous SQLite open would
+    # otherwise stall the whole server for the duration.
+    full = await asyncio.to_thread(get_user_by_id, user["id"])
+    if full is None or not await asyncio.to_thread(
+        verify_password, req.current_password, full["password_hash"]
+    ):
         raise HTTPException(401, "Current password is incorrect")
     if req.new_password == req.current_password:
         raise HTTPException(400, "New password must differ from current")
-    change_password_db(user["id"], req.new_password)
+    await asyncio.to_thread(change_password_db, user["id"], req.new_password)
     logger.info(
         "auth.password.changed",
         extra={"event": "auth.password.changed", "user_id": user["id"]},

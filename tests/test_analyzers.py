@@ -70,7 +70,7 @@ async def test_git_history_no_git(tmp: Path):
     """No git repo → score 50, info finding."""
     ctx = _make_ctx(tmp, {"a.py": "x = 1\n"})
     a = GitHistoryAnalyzer()
-    await a.analyze(ctx)
+    a.analyze(ctx)
     assert a.run.score is not None
     assert a.run.score.value == 50.0
     assert any(f.category == "no_git" for f in a.run.findings)
@@ -80,7 +80,7 @@ async def test_git_history_no_git(tmp: Path):
 async def test_git_history_with_commits(tmp: Path):
     ctx = _make_ctx(tmp, {"main.py": "import os\n"}, with_git=True)
     a = GitHistoryAnalyzer()
-    await a.analyze(ctx)
+    a.analyze(ctx)
     assert a.run.score is not None
     assert a.run.score.label == "history_health"
     assert 0 <= a.run.score.value <= 100
@@ -97,7 +97,7 @@ async def test_architecture_balanced(tmp: Path):
     files = {f"mod{i}/file.py": "# content\n" * 100 for i in range(3)}
     ctx = _make_ctx(tmp, files)
     a = ArchitectureAnalyzer()
-    await a.analyze(ctx)
+    a.analyze(ctx)
     assert a.run.score is not None
     assert a.run.score.label == "architecture_health"
     assert a.run.signals["module_count"] == 3
@@ -111,7 +111,7 @@ async def test_architecture_god_module(tmp: Path):
     files = {f"core/file{i}.py": "# line\n" * 500 for i in range(5)}
     ctx = _make_ctx(tmp, files)
     a = ArchitectureAnalyzer()
-    await a.analyze(ctx)
+    a.analyze(ctx)
     assert a.run.score is not None
     # Should detect god module
     god_findings = [f for f in a.run.findings if f.category == "god_module"]
@@ -133,7 +133,7 @@ async def test_dependencies_no_cycles(tmp: Path):
     }
     ctx = _make_ctx(tmp, files)
     a = DependenciesAnalyzer()
-    await a.analyze(ctx)
+    a.analyze(ctx)
     assert a.run.score is not None
     assert a.run.score.value == 100.0  # No cycles
 
@@ -146,7 +146,7 @@ async def test_dependencies_cycle_detected(tmp: Path):
     }
     ctx = _make_ctx(tmp, files)
     a = DependenciesAnalyzer()
-    await a.analyze(ctx)
+    a.analyze(ctx)
     assert a.run.score is not None
     cycle_findings = [f for f in a.run.findings if f.category == "import_cycle"]
     assert len(cycle_findings) >= 1
@@ -163,7 +163,7 @@ async def test_complexity_short_files(tmp: Path):
     files = {"a.py": "# hi\nx = 1\n", "b.py": "# ok\ny = 2\n"}
     ctx = _make_ctx(tmp, files)
     a = ComplexityAnalyzer()
-    await a.analyze(ctx)
+    a.analyze(ctx)
     assert a.run.score is not None
     assert a.run.score.value >= 80  # Healthy
 
@@ -173,7 +173,7 @@ async def test_complexity_long_file(tmp: Path):
     files = {"big.py": "# line\n" * 600}
     ctx = _make_ctx(tmp, files)
     a = ComplexityAnalyzer()
-    await a.analyze(ctx)
+    a.analyze(ctx)
     assert a.run.score is not None
     long_file_findings = [f for f in a.run.findings if f.category == "long_file"]
     assert len(long_file_findings) >= 1
@@ -189,7 +189,7 @@ async def test_tech_debt_clean(tmp: Path):
     files = {"a.py": "x = 1\n"}
     ctx = _make_ctx(tmp, files)
     a = TechDebtAnalyzer()
-    await a.analyze(ctx)
+    a.analyze(ctx)
     assert a.run.score is not None
     # No TODO/FIXME → high score
     assert a.run.score.value >= 80
@@ -203,7 +203,7 @@ async def test_tech_debt_messy(tmp: Path):
     }
     ctx = _make_ctx(tmp, files)
     a = TechDebtAnalyzer()
-    await a.analyze(ctx)
+    a.analyze(ctx)
     assert a.run.score is not None
     debt_findings = [f for f in a.run.findings if f.category.startswith("debt_")]
     assert len(debt_findings) >= 3
@@ -220,7 +220,7 @@ async def test_coupling_no_modules(tmp: Path):
     files = {"a.py": "x = 1\n"}
     ctx = _make_ctx(tmp, files)
     a = CouplingAnalyzer()
-    await a.analyze(ctx)
+    a.analyze(ctx)
     assert a.run.score is not None
     # Few modules → no painful ones → high score
     assert a.run.score.value >= 80

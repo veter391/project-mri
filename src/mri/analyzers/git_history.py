@@ -36,7 +36,7 @@ class GitHistoryAnalyzer(BaseAnalyzer):
     # scan unbounded. Shared by the commit walk and the churn collection.
     MAX_COMMITS = 10_000
 
-    async def analyze(self, ctx: ScanContext) -> None:  # type: ignore[override]
+    def analyze(self, ctx: ScanContext) -> None:  # type: ignore[override]
         self._start()
         try:
             git = ctx.git
