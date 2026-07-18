@@ -250,6 +250,20 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self.scan_per_minute = scan_per_minute
         self._hits: dict[str, list[float]] = defaultdict(list)
         self._scans: dict[str, list[float]] = defaultdict(list)
+        # Timestamps inside a bucket expire, but the IP keys themselves used to
+        # live forever: one request from an address that never returned left an
+        # entry for the process's lifetime. On a public-facing server that grows
+        # without bound, so stale keys are swept once per window.
+        self._last_sweep = time.time()
+
+    def _sweep_expired(self, now: float, window: float) -> None:
+        """Drop IP keys with nothing inside the window. Runs once per window."""
+        if now - self._last_sweep < window:
+            return
+        self._last_sweep = now
+        for bucket in (self._hits, self._scans):
+            for ip in [k for k, v in bucket.items() if not any(now - t < window for t in v)]:
+                del bucket[ip]
 
     async def dispatch(self, request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
         client = request.client
@@ -267,8 +281,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         limit = self.scan_per_minute if is_scan else self.per_minute
         window = 60.0
         now = time.time()
-        # Drop expired entries
-        bucket[ip] = [t for t in bucket[ip] if now - t < window]
+        self._sweep_expired(now, window)
+        # Drop expired entries for this address; the sweep above removes keys
+        # for addresses that stopped calling entirely.
+        bucket[ip] = [t for t in bucket.get(ip, ()) if now - t < window]
         if len(bucket[ip]) >= limit:
             retry_after = max(1, int(window - (now - bucket[ip][0])))
             logger.warning(

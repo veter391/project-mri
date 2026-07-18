@@ -99,6 +99,19 @@ def init(username: str | None, password: str | None, config_path: str | None, ye
     else:
         click.echo(f"  → config already exists at {cfg_path}", err=True)
 
+    # Writing the file is not the same as it being used. The loader searches a
+    # fixed list of locations, so a custom path is silently ignored unless it
+    # happens to be one of them or MRI_CONFIG points at it. Saying "config
+    # written" and then never reading it is worse than refusing outright.
+    from mri.config import is_discoverable
+
+    if not is_discoverable(cfg_path):
+        click.echo(
+            f"  ! {cfg_path} is not one of the locations project-mri looks in.\n"
+            f"    Set MRI_CONFIG to use it:  export MRI_CONFIG={cfg_path}",
+            err=True,
+        )
+
     # 5. Print next steps
     from mri.config import get_config
     from mri.db.repository import default_db_path

@@ -88,8 +88,8 @@ _DEFAULT_CONFIG: dict[str, Any] = {
 }
 
 
-def _candidate_config_paths() -> list[Path]:
-    """Return the config file search paths in priority order."""
+def _search_order() -> list[Path]:
+    """Every location the loader considers, whether or not it exists."""
     paths: list[Path] = []
     env = os.environ.get("MRI_CONFIG")
     if env:
@@ -98,7 +98,32 @@ def _candidate_config_paths() -> list[Path]:
     paths.append(Path.cwd() / "config.yml")
     paths.append(Path.home() / ".config" / "project-mri" / "config.yml")
     paths.append(Path("/etc/project-mri/config.yml"))
-    return [p for p in paths if p.exists()]
+    return paths
+
+
+def _candidate_config_paths() -> list[Path]:
+    """Return the config file search paths in priority order."""
+    return [p for p in _search_order() if p.exists()]
+
+
+def is_discoverable(path: Path) -> bool:
+    """True if the loader would actually pick this file up.
+
+    Used by `mri init` so that writing a config to a custom location reports
+    honestly: the file gets created either way, but outside the search order
+    nothing ever reads it.
+    """
+    try:
+        resolved = path.expanduser().resolve()
+    except OSError:
+        return False
+    for candidate in _search_order():
+        try:
+            if candidate.expanduser().resolve() == resolved:
+                return True
+        except OSError:
+            continue
+    return False
 
 
 def _deep_merge(base: dict, override: dict) -> dict:
