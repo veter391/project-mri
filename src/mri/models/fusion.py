@@ -124,6 +124,9 @@ class Decision(BaseModel):
     source: Literal["adr", "session", "commit", "issue", "manual"]
     source_ref: str = ""
     session_id: int | None = None
+    #: The project this decision belongs to. None for a decision not tied to a
+    #: scanned project — which is then a confounder for no project's metric.
+    project_id: int | None = None
     file_path: str | None = None
     commit_sha: str | None = None
     decided_at: datetime | None = None

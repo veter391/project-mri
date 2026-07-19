@@ -118,7 +118,9 @@ def parse_adr(text: str) -> ParsedAdr | None:
     )
 
 
-async def ingest_adrs(conn: aiosqlite.Connection, adr_dir: Path) -> int:
+async def ingest_adrs(
+    conn: aiosqlite.Connection, adr_dir: Path, *, project_id: int | None = None
+) -> int:
     """Record every ADR in a directory as a decision.
 
     ADRs are re-read in full on each run: they are few, they are edited (a
@@ -138,6 +140,7 @@ async def ingest_adrs(conn: aiosqlite.Connection, adr_dir: Path) -> int:
             rationale=parsed.rationale,
             source="adr",
             source_ref=name,
+            project_id=project_id,
             decided_at=parsed.decided_at,
             status=parsed.status,
             confidence=ADR_CONFIDENCE,
@@ -146,7 +149,8 @@ async def ingest_adrs(conn: aiosqlite.Connection, adr_dir: Path) -> int:
     ]
     # One transaction: the previous ADR rows survive untouched if any insert
     # fails, instead of a crafted ADR wiping the provenance it was meant to add.
-    return await repo.replace_decisions_of_source(conn, "adr", decisions)
+    # Scoped to the project so one repo's refresh does not wipe another's.
+    return await repo.replace_decisions_of_source(conn, "adr", decisions, project_id=project_id)
 
 
 def _read_and_parse_adrs(adr_dir: Path) -> list[tuple[str, ParsedAdr]] | None:
@@ -192,7 +196,7 @@ def _read_and_parse_adrs(adr_dir: Path) -> list[tuple[str, ParsedAdr]] | None:
     return out
 
 
-def _commit_decision(commit: Any) -> Decision:
+def _commit_decision(commit: Any, project_id: int | None = None) -> Decision:
     message = str(commit.message)
     parts = message.split("\n", 1)
     summary = parts[0].strip()
@@ -205,6 +209,7 @@ def _commit_decision(commit: Any) -> Decision:
         rationale=body or None,
         source="commit",
         source_ref=str(commit.hexsha)[:12],
+        project_id=project_id,
         commit_sha=str(commit.hexsha),
         decided_at=commit.authored_datetime,
         confidence=(
@@ -214,7 +219,12 @@ def _commit_decision(commit: Any) -> Decision:
 
 
 async def ingest_commits(
-    conn: aiosqlite.Connection, git_repo: Any, *, branch: str = "HEAD", max_count: int = 2000
+    conn: aiosqlite.Connection,
+    git_repo: Any,
+    *,
+    branch: str = "HEAD",
+    max_count: int = 2000,
+    project_id: int | None = None,
 ) -> int:
     """Record commits as decisions, skipping any already stored.
 
@@ -228,7 +238,7 @@ async def ingest_commits(
     rather than passing silently, because a silent cap reads as "we captured
     everything" when we did not.
     """
-    decisions = await asyncio.to_thread(_collect_commits, git_repo, branch, max_count)
+    decisions = await asyncio.to_thread(_collect_commits, git_repo, branch, max_count, project_id)
     if len(decisions) == max_count:
         logger.info(
             "commit ingest hit the max_count of %d; commits older than that were not walked",
@@ -237,6 +247,10 @@ async def ingest_commits(
     return await repo.insert_decisions_ignoring_duplicates(conn, decisions)
 
 
-def _collect_commits(git_repo: Any, branch: str, max_count: int) -> list[Decision]:
+def _collect_commits(
+    git_repo: Any, branch: str, max_count: int, project_id: int | None
+) -> list[Decision]:
     """Walk history off the event loop — iterating commits is blocking git I/O."""
-    return [_commit_decision(c) for c in git_repo.iter_commits(branch, max_count=max_count)]
+    return [
+        _commit_decision(c, project_id) for c in git_repo.iter_commits(branch, max_count=max_count)
+    ]

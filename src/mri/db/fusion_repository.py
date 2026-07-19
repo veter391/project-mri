@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Iterable, Iterator
+from datetime import timezone
 from typing import Any
 
 import aiosqlite
@@ -28,6 +29,8 @@ from mri.models.fusion import (
     SessionEvent,
     SessionFileTouch,
 )
+
+_UTC = timezone.utc
 
 __all__ = [
     "authorship_for_file",
@@ -101,7 +104,23 @@ def _limit(value: int) -> int:
 
 
 def _iso(value: Any) -> str | None:
-    return value.isoformat() if hasattr(value, "isoformat") else value
+    """Canonical UTC ISO-8601, so stored timestamps sort chronologically.
+
+    Timestamps in this database are compared as strings by SQLite, which is only
+    correct when they share one offset. A commit authored at +09:00 and a scan
+    stored at +00:00 would otherwise sort by their written offset, not their
+    instant — an audit showed that picking a post-decision scan as the baseline
+    and fabricating a delta. Everything is normalised to UTC; a naive datetime
+    is assumed to already be UTC rather than guessed at.
+    """
+    tzinfo = getattr(value, "tzinfo", None)
+    if not hasattr(value, "isoformat"):
+        return value
+    if tzinfo is not None:
+        value = value.astimezone(_UTC)
+    elif hasattr(value, "replace") and hasattr(value, "hour"):
+        value = value.replace(tzinfo=_UTC)  # a naive datetime; take it as UTC
+    return value.isoformat()
 
 
 def _confounders(raw: Any, *, row_id: Any) -> list[str]:
@@ -338,17 +357,18 @@ async def authorship_for_file(
 
 
 _DECISION_COLUMNS = (
-    "summary, rationale, source, source_ref, session_id, file_path, "
+    "summary, rationale, source, source_ref, session_id, project_id, file_path, "
     "commit_sha, decided_at, status, confidence"
 )
 # Built once from a module constant of literal column names — no value is ever
 # interpolated, so the S608 warning is a false positive here. Concentrated to
 # these two lines rather than repeated at each call site.
+_DECISION_PLACEHOLDERS = "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?"
 _INSERT_DECISION_SQL = (
-    f"INSERT INTO decisions ({_DECISION_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"  # noqa: S608
+    f"INSERT INTO decisions ({_DECISION_COLUMNS}) VALUES ({_DECISION_PLACEHOLDERS})"  # noqa: S608
 )
 _INSERT_OR_IGNORE_DECISION_SQL = (
-    f"INSERT OR IGNORE INTO decisions ({_DECISION_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"  # noqa: S608, E501
+    f"INSERT OR IGNORE INTO decisions ({_DECISION_COLUMNS}) VALUES ({_DECISION_PLACEHOLDERS})"  # noqa: S608, E501
 )
 
 
@@ -359,6 +379,7 @@ def _decision_row(decision: Decision) -> tuple[Any, ...]:
         decision.source,
         decision.source_ref,
         decision.session_id,
+        decision.project_id,
         decision.file_path,
         decision.commit_sha,
         _iso(decision.decided_at),
@@ -374,19 +395,33 @@ async def insert_decision(conn: aiosqlite.Connection, decision: Decision) -> Dec
 
 
 async def replace_decisions_of_source(
-    conn: aiosqlite.Connection, source: str, decisions: list[Decision]
+    conn: aiosqlite.Connection,
+    source: str,
+    decisions: list[Decision],
+    *,
+    project_id: int | None = None,
 ) -> int:
-    """Atomically swap all decisions of one source for a new set.
+    """Atomically swap the decisions of one source for a new set.
 
     The old delete-then-insert-in-a-loop left the table empty for any reader
     that looked mid-refresh, and lost everything if an insert failed partway —
     an audit reproduced a crafted ADR wiping the provenance it was meant to
     record. Delete and re-insert now share one transaction: it either replaces
     the set whole or leaves the previous set untouched.
+
+    When `project_id` is given the swap is scoped to that project, so refreshing
+    one repo's ADRs does not wipe another's. When it is None the whole source is
+    replaced, preserving the single-project default.
     """
     try:
         await conn.execute("BEGIN")
-        await conn.execute("DELETE FROM decisions WHERE source = ?", (source,))
+        if project_id is None:
+            await conn.execute("DELETE FROM decisions WHERE source = ?", (source,))
+        else:
+            await conn.execute(
+                "DELETE FROM decisions WHERE source = ? AND project_id IS ?",
+                (source, project_id),
+            )
         await conn.executemany(_INSERT_DECISION_SQL, [_decision_row(d) for d in decisions])
         await conn.commit()
     except Exception:

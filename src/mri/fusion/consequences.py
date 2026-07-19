@@ -22,8 +22,9 @@ number says so.
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import aiosqlite
 
@@ -40,6 +41,24 @@ _MAX_CONFIDENCE = 0.6
 #: a refactor to land and be re-scanned, short enough that half the project's
 #: later history is not swept in as "the consequence".
 DEFAULT_WINDOW_DAYS = 30
+#: Confounders are a caveat, not a catalogue. A window with thousands of
+#: decisions does not need thousands listed on the row; a sample plus the true
+#: count says as much without writing a multi-megabyte blob per consequence.
+MAX_CONFOUNDERS_LISTED = 50
+
+
+def _utc_iso(moment: datetime) -> str:
+    """Compare against stored timestamps on the same UTC footing they are stored.
+
+    Stored timestamps are canonical UTC (see fusion_repository._iso). A moment
+    computed in memory from a commit's local-offset date must be normalised the
+    same way, or the string comparison that drives baseline/observed selection
+    silently picks the wrong scan."""
+    if moment.tzinfo is not None:
+        moment = moment.astimezone(timezone.utc)
+    else:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return moment.isoformat()
 
 
 @dataclass(slots=True, frozen=True)
@@ -62,7 +81,7 @@ async def _score_before(
         ORDER BY s.started_at DESC
         LIMIT 1
         """,
-        (project_id, metric, moment.isoformat()),
+        (project_id, metric, _utc_iso(moment)),
     )
     row = await cursor.fetchone()
     return _ScorePoint(float(row[0]), datetime.fromisoformat(row[1])) if row else None
@@ -82,33 +101,86 @@ async def _score_within(
         ORDER BY s.started_at DESC
         LIMIT 1
         """,
-        (project_id, metric, start.isoformat(), end.isoformat()),
+        (project_id, metric, _utc_iso(start), _utc_iso(end)),
     )
     row = await cursor.fetchone()
     return _ScorePoint(float(row[0]), datetime.fromisoformat(row[1])) if row else None
 
 
 async def _confounders_in_window(
-    conn: aiosqlite.Connection, start: datetime, end: datetime, *, exclude_id: int | None
+    conn: aiosqlite.Connection,
+    start: datetime,
+    end: datetime,
+    *,
+    project_id: int,
+    exclude_id: int | None,
 ) -> list[str]:
-    """Other decisions dated inside the window — the alternative explanations.
+    """Other decisions in this project dated inside the window.
 
-    Their presence is the honest caveat on any claim that *this* decision moved
-    the metric: something else changed in the same span, and we name it.
+    These are the alternative explanations for the metric moving — the honest
+    caveat that something else changed in the same span. Scoped to the project:
+    a decision in another repo cannot explain this one's metric, and counting it
+    would both mislead and leak another project's decision summaries.
+
+    Bounded: a huge window returns a sample plus a truthful "and N more" rather
+    than a list of thousands written into one row.
     """
     cursor = await conn.execute(
         """
         SELECT id, summary FROM decisions
-        WHERE decided_at IS NOT NULL AND decided_at >= ? AND decided_at <= ?
+        WHERE project_id = ? AND decided_at IS NOT NULL
+              AND decided_at >= ? AND decided_at <= ?
         ORDER BY decided_at
         """,
-        (start.isoformat(), end.isoformat()),
+        (project_id, _utc_iso(start), _utc_iso(end)),
     )
-    return [
-        f"{summary} ({source_id})"
-        for source_id, summary in await cursor.fetchall()
-        if source_id != exclude_id
+    others = [
+        summary for decision_id, summary in await cursor.fetchall() if decision_id != exclude_id
     ]
+    return others
+
+
+def _sample_confounders(all_confounders: list[str]) -> list[str]:
+    """A caveat, not a catalogue: at most a sample, with a truthful remainder."""
+    if len(all_confounders) <= MAX_CONFOUNDERS_LISTED:
+        return all_confounders
+    hidden = len(all_confounders) - MAX_CONFOUNDERS_LISTED
+    return [
+        *all_confounders[:MAX_CONFOUNDERS_LISTED],
+        f"... and {hidden} more decision(s) in this window",
+    ]
+
+
+def _build_consequence(
+    decision: Decision, metric: str, baseline: _ScorePoint, observed: _ScorePoint,
+    window_start: datetime, window_end: datetime, confounders: list[str],
+) -> Consequence | None:
+    """Assemble a consequence, or None if the scores are not real measurements.
+
+    A non-finite score is an upstream analyzer bug, not a finding: an inf delta
+    would be persisted and round-tripped as if it meant something. It is dropped
+    the same way an unmeasurable metric is — absence, not a fabricated number.
+    """
+    if not (math.isfinite(baseline.value) and math.isfinite(observed.value)):
+        return None
+
+    # The confidence reflects the true number of co-occurring decisions, not the
+    # truncated sample: one other change halves it, more lowers it further, and
+    # it is capped below one because a before/after over a window is correlation.
+    confidence = round(_MAX_CONFIDENCE / (1 + len(confounders)), 3)
+    return Consequence(
+        decision_id=decision.id,
+        metric=metric,
+        file_path=decision.file_path,
+        window_start=window_start,
+        window_end=window_end,
+        baseline_value=round(baseline.value, 3),
+        observed_value=round(observed.value, 3),
+        delta=round(observed.value - baseline.value, 3),
+        causal_claim="correlation",  # never causation from this path
+        confounders=_sample_confounders(confounders),
+        confidence=confidence,
+    )
 
 
 async def measure_consequence(
@@ -138,24 +210,10 @@ async def measure_consequence(
         return None
 
     confounders = await _confounders_in_window(
-        conn, window_start, window_end, exclude_id=decision.id
+        conn, window_start, window_end, project_id=project_id, exclude_id=decision.id
     )
-    # One other change in the window halves the confidence; more, more so. Alone,
-    # it is still only correlation over a window, so it is capped, never certain.
-    confidence = round(_MAX_CONFIDENCE / (1 + len(confounders)), 3)
-
-    return Consequence(
-        decision_id=decision.id,
-        metric=metric,
-        file_path=decision.file_path,
-        window_start=window_start,
-        window_end=window_end,
-        baseline_value=round(baseline.value, 3),
-        observed_value=round(observed.value, 3),
-        delta=round(observed.value - baseline.value, 3),
-        causal_claim="correlation",  # never causation from this path
-        confounders=confounders,
-        confidence=confidence,
+    return _build_consequence(
+        decision, metric, baseline, observed, window_start, window_end, confounders
     )
 
 
@@ -174,10 +232,25 @@ async def measure_decision_consequences(
     zero. When `persist` is true the measurable ones are written; the returned
     list is exactly what was measured, whether or not it was stored.
     """
+    if decision.decided_at is None or decision.id is None:
+        return []
+
+    window_start = decision.decided_at
+    window_end = window_start + timedelta(days=window_days)
+    # The confounders are the same for every metric of this decision — one
+    # window, one project — so the query runs once, not once per metric.
+    confounders = await _confounders_in_window(
+        conn, window_start, window_end, project_id=project_id, exclude_id=decision.id
+    )
+
     measured: list[Consequence] = []
     for metric in metrics:
-        consequence = await measure_consequence(
-            conn, decision, metric, project_id=project_id, window_days=window_days
+        baseline = await _score_before(conn, project_id, metric, window_start)
+        observed = await _score_within(conn, project_id, metric, window_start, window_end)
+        if baseline is None or observed is None:
+            continue
+        consequence = _build_consequence(
+            decision, metric, baseline, observed, window_start, window_end, confounders
         )
         if consequence is None:
             continue

@@ -45,11 +45,13 @@ async def _scan_with_score(conn, project_id: int, started_at: datetime, metric: 
     await conn.commit()
 
 
-async def _decision(conn, when: datetime, summary: str = "did a thing") -> Decision:
+async def _decision(
+    conn, when: datetime, summary: str = "did a thing", *, project_id: int | None = None
+) -> Decision:
     d = await repo.insert_decision(
         conn,
         Decision(summary=summary, source="commit", source_ref=summary[:8],
-                 decided_at=when, confidence=0.6),
+                 project_id=project_id, decided_at=when, confidence=0.6),
     )
     return d
 
@@ -121,9 +123,9 @@ async def test_other_decisions_in_the_window_are_named_as_confounders(db: Path):
     async with get_connection(db) as conn:
         pid = await _project(conn)
         await _scan_with_score(conn, pid, _dt(1), "architecture", 60.0)
-        decision = await _decision(conn, _dt(10), "the decision under test")
-        await _decision(conn, _dt(12), "a confounding change")
-        await _decision(conn, _dt(15), "another confounding change")
+        decision = await _decision(conn, _dt(10), "the decision under test", project_id=pid)
+        await _decision(conn, _dt(12), "a confounding change", project_id=pid)
+        await _decision(conn, _dt(15), "another confounding change", project_id=pid)
         await _scan_with_score(conn, pid, _dt(20), "architecture", 75.0)
 
         c = await measure_consequence(conn, decision, "architecture", project_id=pid)
@@ -135,13 +137,13 @@ async def test_confidence_is_never_high_and_drops_with_confounders(db: Path):
     async with get_connection(db) as conn:
         pid = await _project(conn)
         await _scan_with_score(conn, pid, _dt(1), "architecture", 60.0)
-        alone = await _decision(conn, _dt(10), "alone in its window")
+        alone = await _decision(conn, _dt(10), "alone in its window", project_id=pid)
         await _scan_with_score(conn, pid, _dt(20), "architecture", 75.0)
         c_alone = await measure_consequence(conn, alone, "architecture", project_id=pid)
 
-        crowded = await _decision(conn, _dt(11), "crowded")
-        await _decision(conn, _dt(12), "noise one")
-        await _decision(conn, _dt(13), "noise two")
+        crowded = await _decision(conn, _dt(11), "crowded", project_id=pid)
+        await _decision(conn, _dt(12), "noise one", project_id=pid)
+        await _decision(conn, _dt(13), "noise two", project_id=pid)
         c_crowded = await measure_consequence(conn, crowded, "architecture", project_id=pid)
 
     assert c_alone.confidence <= 0.6, "a before/after over a window is never certain"
@@ -202,3 +204,125 @@ async def test_a_regression_is_reported_as_a_negative_delta(db: Path):
         await _scan_with_score(conn, pid, _dt(20), "architecture", 55.0)
         c = await measure_consequence(conn, decision, "architecture", project_id=pid)
     assert c.delta == -25.0
+
+
+# ---------------------------------------------------------------------------
+# What the block-8 audits found
+# ---------------------------------------------------------------------------
+
+
+async def test_another_projects_decision_is_not_a_confounder(db: Path):
+    """Cross-project leak: a decision in project B was counted as a confounder
+    for project A and leaked B's summary. Confounders are scoped to the project."""
+    async with get_connection(db) as conn:
+        a = await _project(conn)
+        b = int((await conn.execute("INSERT INTO projects (name, path) VALUES ('B', '/b')")).lastrowid)
+        await conn.commit()
+        await _scan_with_score(conn, a, _dt(1), "architecture", 60.0)
+        decision = await _decision(conn, _dt(10), "A under test", project_id=a)
+        await _decision(conn, _dt(12), "B private decision", project_id=b)  # other project
+        await _scan_with_score(conn, a, _dt(20), "architecture", 75.0)
+
+        c = await measure_consequence(conn, decision, "architecture", project_id=a)
+    assert c.confounders == [], "another project's decision must not appear"
+    assert c.confidence == 0.6, "and must not drag this project's confidence down"
+
+
+async def test_a_commit_authored_outside_utc_is_ordered_by_its_instant(db: Path):
+    """The critical bug: ISO strings with different offsets sort lexically, so a
+    +09:00 commit date sorted between two UTC scans and a post-decision scan was
+    picked as the baseline. Timestamps are normalised to UTC before comparison."""
+    from datetime import timedelta
+
+    async with get_connection(db) as conn:
+        pid = await _project(conn)
+        # Decision authored at +09:00 on the 10th 01:00 == 09th 16:00 UTC.
+        local = datetime(2026, 3, 10, 1, 0, tzinfo=timezone(timedelta(hours=9)))
+        await _scan_with_score(conn, pid, datetime(2026, 3, 9, 10, 0, tzinfo=timezone.utc), "architecture", 50.0)   # true before
+        await _scan_with_score(conn, pid, datetime(2026, 3, 9, 18, 0, tzinfo=timezone.utc), "architecture", 999.0)  # after the decision
+        await _scan_with_score(conn, pid, datetime(2026, 3, 15, 0, 0, tzinfo=timezone.utc), "architecture", 1000.0) # true after
+        decision = await _decision(conn, local, "tz decision", project_id=pid)
+
+        c = await measure_consequence(conn, decision, "architecture", project_id=pid)
+    assert c.baseline_value == 50.0, "the true pre-decision scan, not one after it"
+    assert c.delta == 950.0
+
+
+async def test_a_scan_exactly_at_the_decision_moment_is_the_baseline(db: Path):
+    """Boundary: <= for the baseline, > for the observed, so a scan at the exact
+    decision instant is the state going in, not the effect coming out."""
+    async with get_connection(db) as conn:
+        pid = await _project(conn)
+        await _scan_with_score(conn, pid, _dt(10), "architecture", 60.0)  # exactly at decision
+        decision = await _decision(conn, _dt(10), project_id=pid)
+        await _scan_with_score(conn, pid, _dt(20), "architecture", 70.0)
+        c = await measure_consequence(conn, decision, "architecture", project_id=pid)
+    assert c.baseline_value == 60.0
+    assert c.observed_value == 70.0
+
+
+async def test_the_closest_scan_before_the_decision_is_the_baseline(db: Path):
+    """With several pre-decision scans, the most recent one is the state going
+    in — not the oldest."""
+    async with get_connection(db) as conn:
+        pid = await _project(conn)
+        await _scan_with_score(conn, pid, _dt(1), "architecture", 10.0)  # old
+        await _scan_with_score(conn, pid, _dt(8), "architecture", 60.0)  # closest before
+        decision = await _decision(conn, _dt(10), project_id=pid)
+        await _scan_with_score(conn, pid, _dt(20), "architecture", 70.0)
+        c = await measure_consequence(conn, decision, "architecture", project_id=pid)
+    assert c.baseline_value == 60.0, "the closest pre-decision scan, not the oldest"
+
+
+async def test_the_latest_scan_in_the_window_is_the_observed(db: Path):
+    """The effect is read at the end of the window: the latest in-window scan,
+    not the first."""
+    async with get_connection(db) as conn:
+        pid = await _project(conn)
+        await _scan_with_score(conn, pid, _dt(1), "architecture", 60.0)
+        decision = await _decision(conn, _dt(10), project_id=pid)
+        await _scan_with_score(conn, pid, _dt(15), "architecture", 65.0)  # early in window
+        await _scan_with_score(conn, pid, _dt(25), "architecture", 80.0)  # latest in window
+        c = await measure_consequence(conn, decision, "architecture", project_id=pid)
+    assert c.observed_value == 80.0, "the latest in-window scan, not the earliest"
+
+
+async def test_a_non_finite_score_is_not_a_measurement(db: Path):
+    """An inf score from an upstream analyzer bug must not be stored as a real
+    delta. It is dropped like any unmeasurable metric."""
+    async with get_connection(db) as conn:
+        pid = await _project(conn)
+        sid = int((await conn.execute(
+            "INSERT INTO scans (project_id, scan_uuid, status, started_at) VALUES (?, 'u-inf', 'completed', ?)",
+            (pid, _dt(1).isoformat()),
+        )).lastrowid)
+        await conn.execute(
+            "INSERT INTO analyzer_runs (scan_id, analyzer_name, status, score_value, score_label)"
+            " VALUES (?, 'architecture', 'completed', ?, 'architecture')",
+            (sid, float("inf")),
+        )
+        await conn.commit()
+        decision = await _decision(conn, _dt(10), project_id=pid)
+        await _scan_with_score(conn, pid, _dt(20), "architecture", 70.0)
+        c = await measure_consequence(conn, decision, "architecture", project_id=pid)
+    assert c is None, "a non-finite baseline yields no consequence, not an inf delta"
+
+
+async def test_confounders_are_capped_with_a_truthful_remainder(db: Path):
+    """A window with thousands of decisions gets a sample plus an honest count,
+    not a multi-megabyte list written into one row."""
+    from mri.fusion.consequences import MAX_CONFOUNDERS_LISTED
+
+    async with get_connection(db) as conn:
+        pid = await _project(conn)
+        await _scan_with_score(conn, pid, _dt(1), "architecture", 60.0)
+        decision = await _decision(conn, _dt(10), "under test", project_id=pid)
+        for i in range(MAX_CONFOUNDERS_LISTED + 20):
+            await _decision(conn, _dt(11), f"noise {i}", project_id=pid)
+        await _scan_with_score(conn, pid, _dt(20), "architecture", 70.0)
+
+        c = await measure_consequence(conn, decision, "architecture", project_id=pid)
+    assert len(c.confounders) == MAX_CONFOUNDERS_LISTED + 1, "sample plus a remainder line"
+    assert "more decision(s)" in c.confounders[-1]
+    # Confidence reflects the TRUE count, not the truncated sample.
+    assert c.confidence < 0.6 / MAX_CONFOUNDERS_LISTED
