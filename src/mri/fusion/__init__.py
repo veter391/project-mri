@@ -16,10 +16,14 @@ from mri.fusion.authorship import (
     authorship_evidence_for,
     weight_hotspots,
 )
+from mri.fusion.decisions import ingest_adrs, ingest_commits, parse_adr
 
 __all__ = [
     "AuthorshipEvidence",
     "WeightedRisk",
     "authorship_evidence_for",
+    "ingest_adrs",
+    "ingest_commits",
+    "parse_adr",
     "weight_hotspots",
 ]
