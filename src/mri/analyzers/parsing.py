@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 from functools import lru_cache
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 try:
@@ -124,6 +124,56 @@ def walk_imports(root: Any, content: str) -> list[str]:
     return imports
 
 
+def resolve_python_import(ctx: Any, importer_rel: str, specifier: str) -> str | None:
+    """Turn a Python import into the repo-relative file it refers to.
+
+    Returns None when the target is not a file in this repository — a
+    third-party or stdlib import — because inventing a node for it inflates
+    fan-out and leaves the graph full of edges to things that do not exist.
+
+    Relative imports are why this function exists. `from .helpers import h` used
+    to become the literal key "/helpers.py", and `from ..core import Thing`
+    became "//core.py": nodes that match no file, so every intra-package edge
+    vanished from the graph. Packages that use relative imports internally —
+    which is most well-factored ones — therefore showed no cycles and near-zero
+    internal coupling, and read as maximally stable. That is not noise; it is a
+    metric that is confidently wrong in a way that correlates with code style.
+    """
+    known = ctx.known_files()
+    dots = len(specifier) - len(specifier.lstrip("."))
+    tail = specifier[dots:]
+
+    if dots:
+        # `.` is the importing module's own package, `..` its parent, and so on.
+        base = PurePosixPath(importer_rel.replace("\\", "/")).parent
+        for _ in range(dots - 1):
+            base = base.parent
+        parts = [p for p in (str(base).split("/") if str(base) != "." else []) if p]
+        parts += tail.split(".") if tail else []
+    else:
+        parts = tail.split(".")
+
+    if not parts:
+        return None
+
+    # `from pkg.mod import thing` names an object, not a module: falling back to
+    # the parent lands the edge on pkg/mod rather than nowhere.
+    stems = ["/".join(parts)]
+    if len(parts) > 1:
+        stems.append("/".join(parts[:-1]))
+
+    # A relative import is already anchored at the importing file, so only an
+    # absolute one needs the source-root prefixes.
+    prefixes = ("",) if dots else ctx.source_roots()
+    for stem in stems:
+        for prefix in prefixes:
+            base = f"{prefix}/{stem}" if prefix else stem
+            for candidate in (f"{base}.py", f"{base}/__init__.py"):
+                if candidate in known:
+                    return candidate
+    return None
+
+
 def extract_imports(ctx: Any, rel_path: str, content: str) -> list[str]:
     """Import paths declared by a file.
 
@@ -139,13 +189,14 @@ def extract_imports(ctx: Any, rel_path: str, content: str) -> list[str]:
         if tree is not None:
             imports = walk_imports(tree.root_node, content)
             if language == "python":
-                # The AST yields dotted module names; downstream keys on paths.
-                # Normalise to the same shape the regex fallback produces, or the
-                # two paths would build different graphs for the same file.
+                # Resolve against the files actually present rather than
+                # rewriting dots into slashes and hoping. Anything that does not
+                # resolve is a third-party or stdlib import and is dropped, not
+                # turned into a node that matches nothing.
                 imports = [
-                    module.replace(".", "/") + ".py"
+                    resolved
                     for module in imports
-                    if module.strip(".")  # skip bare relative markers like "."
+                    if (resolved := resolve_python_import(ctx, rel_path, module)) is not None
                 ]
             if imports:
                 return imports
@@ -154,10 +205,11 @@ def extract_imports(ctx: Any, rel_path: str, content: str) -> list[str]:
         out = []
         for m in _PY_IMPORT.finditer(content):
             module = m.group(1) or m.group(2)
-            # `from . import x` captures a bare "." — turning that into "/.py"
-            # put a meaningless node into the dependency graph.
-            if module and module.strip("."):
-                out.append(module.replace(".", "/") + ".py")
+            if not module:
+                continue
+            resolved = resolve_python_import(ctx, rel_path, module)
+            if resolved is not None:
+                out.append(resolved)
         return out
     if suffix in (".js", ".ts", ".tsx", ".mjs", ".cjs"):
         return [
@@ -170,6 +222,7 @@ def extract_imports(ctx: Any, rel_path: str, content: str) -> list[str]:
 
 __all__ = [
     "EXT_TO_LANGUAGE",
+    "resolve_python_import",
     "HAS_TREE_SITTER",
     "extract_imports",
     "get_parser_for",

@@ -60,6 +60,46 @@ class ScanContext:
     _content_bytes: int = field(default=0, repr=False)
     _tree_source_chars: int = field(default=0, repr=False)
     _budgets_reported: set[str] = field(default_factory=set, repr=False)
+    #: Repo-relative paths of every walked file, `/`-separated. Import
+    #: resolution checks candidates against this, so it is built once rather
+    #: than per file — rebuilding it inside the resolver made resolution O(n^2).
+    _known_files: set[str] | None = field(default=None, repr=False)
+    _source_roots: tuple[str, ...] | None = field(default=None, repr=False)
+
+    def known_files(self) -> set[str]:
+        """Every walked path, normalised, computed once per scan."""
+        if self._known_files is None:
+            self._known_files = {
+                f.get("rel_path", "").replace("\\", "/") for f in self.files
+            }
+        return self._known_files
+
+    def source_roots(self) -> tuple[str, ...]:
+        """Directory prefixes that absolute imports are relative to.
+
+        An absolute import names a module as the interpreter sees it, not as the
+        repository stores it: in a src-layout project `import mri.analyzers` is
+        `src/mri/analyzers`. Resolving without this finds nothing at all in the
+        most common Python layout — including this repository.
+
+        A source root is the parent of a top-level package: a directory holding
+        `__init__.py` whose own parent does not. `""` is always included so flat
+        layouts keep working.
+        """
+        if self._source_roots is None:
+            package_dirs = {
+                path.rsplit("/", 1)[0]
+                for path in self.known_files()
+                if path.endswith("/__init__.py")
+            }
+            roots = {""}
+            for directory in package_dirs:
+                parent = directory.rsplit("/", 1)[0] if "/" in directory else ""
+                # Only a *top-level* package marks a root; nested packages do not.
+                if parent not in package_dirs:
+                    roots.add(parent)
+            self._source_roots = tuple(sorted(roots, key=len))
+        return self._source_roots
 
     #: Stop retaining file contents past this many characters.
     CONTENT_BUDGET_CHARS: ClassVar[int] = 64 * 1024 * 1024

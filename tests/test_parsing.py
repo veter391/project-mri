@@ -37,30 +37,41 @@ def test_javascript_imports_are_found_via_the_ast():
 def test_multibyte_characters_do_not_shift_the_extracted_text(tmp_path: Path):
     """Byte offsets against a str returned the wrong span. An em dash before the
     import was enough to turn `pathlib` into `thlib i`."""
-    source = "# a comment with an em dash — and another —\nimport pathlib\nfrom pkg.mod import x\n"
-    rel = "multibyte.py"
-    (tmp_path / rel).write_text(source, encoding="utf-8")
-    found = extract_imports(_ctx(tmp_path), rel, source)
-    # Exact equality: a shifted span produced entries like "thlib i.py", which
-    # a substring check would not reliably catch (and "pathlib.py" itself
-    # contains "thlib", which is how a sloppier assertion failed here).
-    assert set(found) == {"pathlib.py", "pkg/mod.py"}
+    source = (
+        "# a comment with an em dash — and another —\n"
+        "from pkg.mod import x\n"
+        "from neighbour import y\n"
+    )
+    # The targets must exist: resolution correctly drops anything that is not a
+    # file here, so without them the test would pass while exercising nothing.
+    ctx = _package(tmp_path, {
+        "pkg/__init__.py": "",
+        "pkg/mod.py": "",
+        "neighbour.py": "",
+        "multibyte.py": source,
+    })
+    found = extract_imports(ctx, "multibyte.py", source)
+    # Exact equality: a shifted span produced entries like "thlib i.py", which a
+    # substring check would not reliably catch.
+    assert set(found) == {"pkg/mod.py", "neighbour.py"}
 
 
 def test_ast_and_regex_paths_agree_on_shape(tmp_path: Path):
     """Downstream keys the dependency graph on these strings, so both paths must
     produce the same form or the two would build different graphs."""
     source = "import os\nfrom pkg.mod import thing\n"
-    rel = "plain.py"
-    (tmp_path / rel).write_text(source, encoding="utf-8")
-    from_ast = extract_imports(_ctx(tmp_path), rel, source)
+    ctx = _package(tmp_path, {"pkg/__init__.py": "", "pkg/mod.py": "", "plain.py": source})
 
-    from mri.analyzers.parsing import _PY_IMPORT
+    from mri.analyzers.parsing import _PY_IMPORT, resolve_python_import
 
+    from_ast = extract_imports(ctx, "plain.py", source)
     from_regex = [
-        (m.group(1) or m.group(2)).replace(".", "/") + ".py" for m in _PY_IMPORT.finditer(source)
+        resolved
+        for m in _PY_IMPORT.finditer(source)
+        if (resolved := resolve_python_import(ctx, "plain.py", m.group(1) or m.group(2)))
     ]
-    assert set(from_ast) == set(from_regex) == {"os.py", "pkg/mod.py"}
+    # `os` is stdlib: it resolves to nothing on both paths, which is the point.
+    assert set(from_ast) == set(from_regex) == {"pkg/mod.py"}
 
 
 def test_relative_marker_is_not_emitted_as_a_module(tmp_path: Path):
@@ -68,3 +79,80 @@ def test_relative_marker_is_not_emitted_as_a_module(tmp_path: Path):
     rel = "rel.py"
     (tmp_path / rel).write_text(source, encoding="utf-8")
     assert extract_imports(_ctx(tmp_path), rel, source) == []
+
+
+# ---------------------------------------------------------------------------
+# Import resolution against the files that actually exist
+# ---------------------------------------------------------------------------
+
+
+def _package(tmp_path: Path, layout: dict[str, str]) -> ScanContext:
+    for rel, body in layout.items():
+        target = tmp_path / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(body, encoding="utf-8")
+    from mri.services.scanner import Scanner
+
+    return ScanContext(
+        project_path=tmp_path, branch="main", files=Scanner._walk_files(tmp_path), git=None
+    )
+
+
+def test_relative_imports_resolve_to_real_files(tmp_path: Path):
+    """`from .helpers import h` became the literal key "/helpers.py" and
+    `from ..core import Thing` became "//core.py" — nodes matching no file. Every
+    intra-package edge vanished, so packages using relative imports internally
+    showed no cycles and read as maximally stable."""
+    ctx = _package(tmp_path, {
+        "pkg/__init__.py": "from .core import Thing\n",
+        "pkg/core.py": "from .helpers import helper\n",
+        "pkg/helpers.py": "",
+        "pkg/sub/__init__.py": "",
+        "pkg/sub/deep.py": "from ..core import Thing\nfrom .sibling import x\n",
+        "pkg/sub/sibling.py": "",
+    })
+    assert extract_imports(ctx, "pkg/__init__.py", ctx.read_text("pkg/__init__.py")) == ["pkg/core.py"]
+    assert extract_imports(ctx, "pkg/core.py", ctx.read_text("pkg/core.py")) == ["pkg/helpers.py"]
+    deep = extract_imports(ctx, "pkg/sub/deep.py", ctx.read_text("pkg/sub/deep.py"))
+    assert set(deep) == {"pkg/core.py", "pkg/sub/sibling.py"}
+
+
+def test_third_party_imports_are_not_invented_as_nodes(tmp_path: Path):
+    """An import that is not a file in this repository is external. Fabricating
+    a node for it inflates fan-out and fills the graph with edges to nothing."""
+    ctx = _package(tmp_path, {"app/__init__.py": "", "app/main.py": "import os\nimport requests\n"})
+    assert extract_imports(ctx, "app/main.py", ctx.read_text("app/main.py")) == []
+
+
+def test_src_layout_absolute_imports_resolve(tmp_path: Path):
+    """An absolute import names the module as the interpreter sees it, not as the
+    repository stores it. Without source-root detection this resolved nothing at
+    all in src-layout projects — the most common Python layout."""
+    ctx = _package(tmp_path, {
+        "src/proj/__init__.py": "",
+        "src/proj/core.py": "",
+        "src/proj/app.py": "from proj.core import Thing\n",
+    })
+    assert ctx.source_roots() == ("", "src")
+    assert extract_imports(ctx, "src/proj/app.py", ctx.read_text("src/proj/app.py")) == [
+        "src/proj/core.py"
+    ]
+
+
+def test_importing_an_object_lands_on_its_module(tmp_path: Path):
+    """`from pkg.mod import thing` names an object, not a module; the edge
+    belongs on pkg/mod."""
+    ctx = _package(tmp_path, {
+        "pkg/__init__.py": "", "pkg/mod.py": "thing = 1\n",
+        "pkg/user.py": "from pkg.mod import thing\n",
+    })
+    assert extract_imports(ctx, "pkg/user.py", ctx.read_text("pkg/user.py")) == ["pkg/mod.py"]
+
+
+def test_package_import_resolves_to_its_init(tmp_path: Path):
+    ctx = _package(tmp_path, {
+        "pkg/__init__.py": "", "pkg/sub/__init__.py": "",
+        "pkg/user.py": "from pkg import sub\nimport pkg.sub\n",
+    })
+    resolved = extract_imports(ctx, "pkg/user.py", ctx.read_text("pkg/user.py"))
+    assert "pkg/sub/__init__.py" in resolved or "pkg/__init__.py" in resolved
