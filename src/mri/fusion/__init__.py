@@ -5,8 +5,8 @@ The fusion *tables* (models/fusion.py, db/fusion_repository.py) and their
 It reads what ingest stored and produces answers the base scan cannot, because
 the base scan never sees a session log.
 
-Today that is authorship-weighted risk. Decision provenance and the consequence
-loop will live here too.
+It covers authorship-weighted risk, decision provenance, and the consequence
+loop.
 """
 from __future__ import annotations
 

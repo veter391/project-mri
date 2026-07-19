@@ -93,6 +93,13 @@ async def _forget_session(conn: aiosqlite.Connection, session_id: int) -> None:
     await conn.commit()
 
 
+async def _event_ids_by_seq(conn: aiosqlite.Connection, session_id: int) -> dict[int, int]:
+    cursor = await conn.execute(
+        "SELECT seq, id FROM session_events WHERE session_id = ?", (session_id,)
+    )
+    return {int(seq): int(event_id) for seq, event_id in await cursor.fetchall()}
+
+
 async def _watermark(
     conn: aiosqlite.Connection, session_id: int, parsed: claude_code.ParsedSession
 ) -> tuple[int, bool]:
@@ -132,9 +139,15 @@ async def ingest_log(
     log: Path,
     *,
     repo_root: Path,
+    project_id: int | None = None,
     store_content: bool = False,
 ) -> IngestResult:
     """Ingest one session log.
+
+    `project_id` links the session — and every touch derived from it — to the
+    scanned project, so authorship evidence for a same-named file in another repo
+    cannot blend in. None is allowed (evidence for no project), but a real scan
+    should pass it.
 
     Safe to call again on the same file: an unchanged log is a no-op, a grown
     one costs only its new turns, and a rewritten one is re-read in full. Not
@@ -155,6 +168,7 @@ async def ingest_log(
         Session(
             source=claude_code.SOURCE,
             external_id=parsed.external_id,
+            project_id=project_id,
             workspace_path=parsed.workspace_path,
             started_at=parsed.started_at,
             ended_at=parsed.ended_at,
@@ -189,20 +203,27 @@ async def ingest_log(
                 occurred_at=turn.occurred_at,
             )
 
-    def touches() -> Iterator[SessionFileTouch]:
-        for touch in parsed.touches:
-            if touch.seq <= watermark:
-                continue
-            yield SessionFileTouch(
-                session_id=session_id,
-                file_path=touch.file_path,
-                touch_kind=touch.touch_kind,  # type: ignore[arg-type]
-                confidence=touch.confidence,
-                occurred_at=touch.occurred_at,
-            )
-
     try:
         events_written = await repo.insert_session_events(conn, events())
+        # Map each stored turn's seq to its row id so a touch can point at the
+        # turn that produced it — the link the schema always promised and never
+        # populated until now.
+        seq_to_event_id = await _event_ids_by_seq(conn, session_id)
+
+        def touches() -> Iterator[SessionFileTouch]:
+            for touch in parsed.touches:
+                if touch.seq <= watermark:
+                    continue
+                yield SessionFileTouch(
+                    session_id=session_id,
+                    project_id=project_id,
+                    event_id=seq_to_event_id.get(touch.seq),
+                    file_path=touch.file_path,
+                    touch_kind=touch.touch_kind,  # type: ignore[arg-type]
+                    confidence=touch.confidence,
+                    occurred_at=touch.occurred_at,
+                )
+
         touches_written = await repo.insert_session_file_touches(conn, touches())
     except sqlite3.IntegrityError as exc:
         # UNIQUE (session_id, seq) fired: another ingest wrote these turns
@@ -226,14 +247,16 @@ async def ingest_workspace(
     conn: aiosqlite.Connection,
     workspace: Path,
     *,
+    project_id: int | None = None,
     store_content: bool = False,
     home: Path | None = None,
 ) -> IngestResult:
     """Ingest every session recorded against this workspace.
 
-    Returns an empty result when no logs are found, which is the common case:
-    most repositories were never touched by an agent, and that is a real answer
-    rather than a failure.
+    `project_id` links every ingested session to the scanned project so its
+    authorship evidence stays scoped to that project. Returns an empty result
+    when no logs are found, which is the common case: most repositories were
+    never touched by an agent, and that is a real answer rather than a failure.
     """
     root = await asyncio.to_thread(workspace.resolve)
     # Discovery opens every candidate log to read its recorded cwd — blocking,
@@ -241,7 +264,9 @@ async def ingest_workspace(
     logs = await asyncio.to_thread(claude_code.logs_for_workspace, root, home=home)
     total = IngestResult()
     for log in logs:
-        total += await ingest_log(conn, log, repo_root=root, store_content=store_content)
+        total += await ingest_log(
+            conn, log, repo_root=root, project_id=project_id, store_content=store_content
+        )
     logger.info(
         "ingested %d session(s) from %s: %d event(s), %d touch(es), %d unchanged",
         total.sessions, root, total.events, total.touches, total.unchanged,

@@ -225,8 +225,14 @@ async def test_session_ingest_is_idempotent(db: Path):
 
 async def test_round_trip_preserves_every_guarantee(db: Path):
     async with get_connection(db) as conn:
+        pid = int((await conn.execute(
+            "INSERT INTO projects (name, path) VALUES ('p', '/p')"
+        )).lastrowid)
+        await conn.commit()
+
         session = await repo.upsert_session(
-            conn, Session(source="cursor", external_id="s-1", content_stored=False)
+            conn,
+            Session(source="cursor", external_id="s-1", project_id=pid, content_stored=False),
         )
         assert session.id is not None
 
@@ -242,21 +248,22 @@ async def test_round_trip_preserves_every_guarantee(db: Path):
         await repo.insert_session_file_touch(
             conn,
             SessionFileTouch(
-                session_id=session.id, file_path="src/a.py", touch_kind="write", confidence=0.4
+                session_id=session.id, project_id=pid, file_path="src/a.py",
+                touch_kind="write", confidence=0.4,
             ),
         )
-        touches = await repo.touches_for_file(conn, "src/a.py")
+        touches = await repo.touches_for_file(conn, "src/a.py", project_id=pid)
         assert touches[0].confidence == 0.4
         assert touches[0].commit_sha is None, "an uncommitted touch is a real state"
 
         await repo.insert_authorship_share(
             conn,
             AuthorshipShare(
-                file_path="src/a.py", share_ai=40, share_human=35, share_unattributed=25,
-                method="session_overlap", confidence=0.6,
+                project_id=pid, file_path="src/a.py", share_ai=40, share_human=35,
+                share_unattributed=25, method="session_overlap", confidence=0.6,
             ),
         )
-        shares = await repo.authorship_for_file(conn, "src/a.py")
+        shares = await repo.authorship_for_file(conn, "src/a.py", project_id=pid)
         assert shares[0].share_unattributed == 25
         assert shares[0].method == "session_overlap"
 
@@ -264,11 +271,11 @@ async def test_round_trip_preserves_every_guarantee(db: Path):
             conn,
             Decision(
                 summary="extracted the scoring module", rationale=None,
-                source="commit", source_ref="deadbeef", file_path="src/a.py",
+                source="commit", source_ref="deadbeef", project_id=pid, file_path="src/a.py",
             ),
         )
         assert decision.id is not None
-        assert (await repo.decisions_for_file(conn, "src/a.py"))[0].rationale is None
+        assert (await repo.decisions_for_file(conn, "src/a.py", project_id=pid))[0].rationale is None
 
         await repo.insert_consequence(
             conn,

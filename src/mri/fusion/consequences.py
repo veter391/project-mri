@@ -24,11 +24,12 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 import aiosqlite
 
 from mri.db import fusion_repository as repo
+from mri.db.fusion_repository import utc_iso
 from mri.models.fusion import Consequence, Decision
 
 __all__ = ["measure_consequence", "measure_decision_consequences"]
@@ -47,18 +48,11 @@ DEFAULT_WINDOW_DAYS = 30
 MAX_CONFOUNDERS_LISTED = 50
 
 
-def _utc_iso(moment: datetime) -> str:
-    """Compare against stored timestamps on the same UTC footing they are stored.
-
-    Stored timestamps are canonical UTC (see fusion_repository._iso). A moment
-    computed in memory from a commit's local-offset date must be normalised the
-    same way, or the string comparison that drives baseline/observed selection
-    silently picks the wrong scan."""
-    if moment.tzinfo is not None:
-        moment = moment.astimezone(timezone.utc)
-    else:
-        moment = moment.replace(tzinfo=timezone.utc)
-    return moment.isoformat()
+#: Normalise a moment to canonical UTC before comparing it against stored
+#: timestamps. Shared with the storage layer (fusion_repository.utc_iso) so a
+#: window bound computed in memory and a timestamp written to the DB are on the
+#: identical footing — a divergence here silently picks the wrong baseline scan.
+_utc_iso = utc_iso
 
 
 @dataclass(slots=True, frozen=True)

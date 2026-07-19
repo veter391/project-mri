@@ -38,6 +38,9 @@ class Session(BaseModel):
     source: str
     #: The originating tool's own id, so re-ingesting the same log is idempotent.
     external_id: str
+    #: The project this session belongs to. None until linked; a session with no
+    #: project is evidence for no project's risk — the conservative default.
+    project_id: int | None = None
     workspace_path: str = ""
     started_at: datetime | None = None
     ended_at: datetime | None = None
@@ -70,6 +73,9 @@ class SessionFileTouch(BaseModel):
 
     id: int | None = None
     session_id: int
+    #: The project the touched file belongs to, denormalised from the session so
+    #: file-path lookups scope with one indexed predicate instead of a join.
+    project_id: int | None = None
     event_id: int | None = None
     file_path: str
     #: None until the touch is tied to a commit. A session edits files long
@@ -86,6 +92,8 @@ class AuthorshipShare(BaseModel):
     """How a file's content divides between AI, human, and unknown."""
 
     id: int | None = None
+    #: The project this file belongs to, so shares scope per project like touches.
+    project_id: int | None = None
     file_path: str
     commit_sha: str | None = None
     share_ai: float = Field(default=0.0, ge=0.0, le=100.0)

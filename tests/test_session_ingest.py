@@ -200,10 +200,14 @@ async def test_ingest_is_idempotent_and_resumable(db: Path, tmp_path: Path, repo
     log = _log(tmp_path / "s.jsonl", records)
 
     async with get_connection(db) as conn:
-        first = await ingest_log(conn, log, repo_root=repo_root)
+        pid = int((await conn.execute(
+            "INSERT INTO projects (name, path) VALUES ('p', '/p')"
+        )).lastrowid)
+        await conn.commit()
+        first = await ingest_log(conn, log, repo_root=repo_root, project_id=pid)
         assert (first.sessions, first.events, first.touches) == (1, 2, 1)
 
-        again = await ingest_log(conn, log, repo_root=repo_root)
+        again = await ingest_log(conn, log, repo_root=repo_root, project_id=pid)
         assert (again.events, again.touches, again.unchanged) == (0, 0, 1)
 
         # The log grows, as a live one does.
@@ -211,12 +215,12 @@ async def test_ingest_is_idempotent_and_resumable(db: Path, tmp_path: Path, repo
         records.append(_turn(4, "user", cwd, [_result("u2")]))
         _log(log, records)
 
-        third = await ingest_log(conn, log, repo_root=repo_root)
+        third = await ingest_log(conn, log, repo_root=repo_root, project_id=pid)
         assert (third.events, third.touches) == (2, 1)
 
         cursor = await conn.execute("SELECT count(*) FROM session_events")
         assert (await cursor.fetchone())[0] == 4
-        assert len(await repo.touches_for_file(conn, "src/a.py")) == 1
+        assert len(await repo.touches_for_file(conn, "src/a.py", project_id=pid)) == 1
 
 
 async def test_ingest_respects_retention_and_redacts_on_the_way_back(
@@ -302,7 +306,11 @@ async def test_a_rewritten_log_is_re_read_not_silently_skipped(
     log = _log(tmp_path / "s.jsonl", first)
 
     async with get_connection(db) as conn:
-        await ingest_log(conn, log, repo_root=repo_root)
+        pid = int((await conn.execute(
+            "INSERT INTO projects (name, path) VALUES ('p', '/p')"
+        )).lastrowid)
+        await conn.commit()
+        await ingest_log(conn, log, repo_root=repo_root, project_id=pid)
 
         # Turn 3 is rewritten: it is now a real edit of a different file.
         rewritten = list(first)
@@ -312,9 +320,9 @@ async def test_a_rewritten_log_is_re_read_not_silently_skipped(
         rewritten.append(_turn(4, "user", cwd, [_result("u9")]))
         _log(log, rewritten)
 
-        result = await ingest_log(conn, log, repo_root=repo_root)
+        result = await ingest_log(conn, log, repo_root=repo_root, project_id=pid)
         assert result.rewritten == 1, "the rewrite must be noticed and reported"
-        touches = await repo.touches_for_file(conn, "src/b.py")
+        touches = await repo.touches_for_file(conn, "src/b.py", project_id=pid)
         cursor = await conn.execute("SELECT count(*) FROM session_events")
         stored = (await cursor.fetchone())[0]
 
@@ -452,3 +460,68 @@ async def test_a_racing_ingest_fails_loudly_rather_than_duplicating(
                 await ingest_log(conn, log, repo_root=repo_root)
         finally:
             service._forget_session = original
+
+
+# ---------------------------------------------------------------------------
+# Seam: ingest -> authorship, project scoping, and the event_id link
+# ---------------------------------------------------------------------------
+
+
+async def test_ingest_then_authorship_end_to_end_and_project_scoped(
+    db: Path, tmp_path: Path, repo_root: Path
+):
+    """The boundary the whole-subsystem audit flagged as untested: a real log
+    ingested through ingest_log, then fed to weight_hotspots — and isolated from
+    another project touching the same file path."""
+    from mri.fusion import weight_hotspots
+
+    cwd = str(repo_root)
+    log = _log(tmp_path / "s.jsonl", [
+        _turn(1, "assistant", cwd, [_use("Write", str(repo_root / "src" / "a.py"), "u1")]),
+        _turn(2, "user", cwd, [_result("u1")]),
+    ])
+    async with get_connection(db) as conn:
+        mine = int((await conn.execute(
+            "INSERT INTO projects (name, path) VALUES ('mine', ?)", (cwd,)
+        )).lastrowid)
+        other = int((await conn.execute(
+            "INSERT INTO projects (name, path) VALUES ('other', '/other')"
+        )).lastrowid)
+        await conn.commit()
+
+        # Another project's session wrote a same-named file.
+        other_log = _log(tmp_path / "o.jsonl", [
+            _turn(1, "assistant", cwd, [_use("Write", str(repo_root / "src" / "a.py"), "x1")]),
+            _turn(2, "user", cwd, [_result("x1")]),
+        ])
+        await ingest_log(conn, other_log, repo_root=repo_root, project_id=other)
+
+        await ingest_log(conn, log, repo_root=repo_root, project_id=mine)
+
+        weighted = await weight_hotspots(conn, {"src/a.py": 50.0}, project_id=mine)
+        assert weighted[0].evidence.ai_write_touches == 1, "only my project's touch counts"
+        assert weighted[0].weighted_risk == 45.0
+
+
+async def test_a_touch_is_linked_to_the_turn_that_produced_it(
+    db: Path, tmp_path: Path, repo_root: Path
+):
+    """event_id was defined and indexed since 0002 but never populated — the
+    schema asserted a link that did not exist. It does now."""
+    cwd = str(repo_root)
+    log = _log(tmp_path / "s.jsonl", [
+        _turn(1, "assistant", cwd, [_use("Write", str(repo_root / "src" / "a.py"), "u1")]),
+        _turn(2, "user", cwd, [_result("u1")]),
+    ])
+    async with get_connection(db) as conn:
+        pid = int((await conn.execute(
+            "INSERT INTO projects (name, path) VALUES ('p', ?)", (cwd,)
+        )).lastrowid)
+        await conn.commit()
+        await ingest_log(conn, log, repo_root=repo_root, project_id=pid)
+        row = await (await conn.execute(
+            "SELECT t.event_id, e.seq FROM session_file_touches t"
+            " JOIN session_events e ON e.id = t.event_id"
+        )).fetchone()
+    assert row is not None, "the touch must resolve to a real event row"
+    assert row[1] == 1, "the touch points at the assistant turn that made the Write"

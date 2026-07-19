@@ -91,9 +91,13 @@ class WeightedRisk:
 
 
 async def authorship_evidence_for(
-    conn: aiosqlite.Connection, file_paths: list[str]
+    conn: aiosqlite.Connection, file_paths: list[str], *, project_id: int
 ) -> dict[str, AuthorshipEvidence]:
-    """Gather per-file authorship evidence for the given paths.
+    """Gather per-file authorship evidence for the given paths in one project.
+
+    `project_id` is required: a file path is unique only within a project, and
+    two repos in one database sharing a name like "README.md" would otherwise
+    blend their AI-touch evidence into one risk number.
 
     Paths with no touches are simply absent from the result — an empty answer,
     not a fabricated zero-strength row.
@@ -104,13 +108,14 @@ async def authorship_evidence_for(
     merging the per-file rows is exact.
     """
     evidence: dict[str, AuthorshipEvidence] = {}
-    for batch in _chunks(file_paths, _SQL_VARIABLE_LIMIT):
+    # One slot of the variable budget goes to project_id; the rest to the paths.
+    for batch in _chunks(file_paths, _SQL_VARIABLE_LIMIT - 1):
         # The only value interpolated is a run of `?` placeholders, one per path;
         # every path itself is bound. SQLite has no parameterised form for a
         # variable-length IN list, so placeholder expansion is the standard way.
         placeholders = ",".join("?" * len(batch))
         query = (
-            "SELECT "  # noqa: S608 - only `?` placeholders are interpolated; paths are bound
+            "SELECT "  # noqa: S608 - only `?` placeholders are interpolated; values are bound
             "file_path, "
             "sum(CASE WHEN touch_kind IN ('write','create') THEN 1 ELSE 0 END) AS writes, "
             "sum(CASE WHEN touch_kind = 'read' THEN 1 ELSE 0 END) AS reads, "
@@ -119,10 +124,10 @@ async def authorship_evidence_for(
             "max(CASE WHEN touch_kind != 'read' THEN confidence END) AS strength, "
             "max(CASE WHEN touch_kind != 'read' THEN occurred_at END) AS last_write "
             "FROM session_file_touches "
-            f"WHERE file_path IN ({placeholders}) "
+            f"WHERE project_id = ? AND file_path IN ({placeholders}) "
             "GROUP BY file_path"
         )
-        cursor = await conn.execute(query, batch)
+        cursor = await conn.execute(query, (project_id, *batch))
         for row in await cursor.fetchall():
             data = dict(row)
             last_write_raw = data["last_write"]
@@ -146,15 +151,16 @@ async def authorship_evidence_for(
 
 
 async def weight_hotspots(
-    conn: aiosqlite.Connection, hotspots: dict[str, float]
+    conn: aiosqlite.Connection, hotspots: dict[str, float], *, project_id: int
 ) -> list[WeightedRisk]:
-    """Annotate scored files with authorship evidence, ordered by the risk that
-    sits under agent-touched code.
+    """Annotate one project's scored files with authorship evidence, ordered by
+    the risk that sits under agent-touched code.
 
     `hotspots` maps a repo-relative path to a base risk score the scan produced.
-    Files without write evidence are still returned — a risky file nobody has
-    evidence an agent touched is itself a finding, and dropping it would bias the
-    picture towards agent involvement.
+    `project_id` scopes the evidence so a same-named file in another scanned repo
+    cannot leak in. Files without write evidence are still returned — a risky
+    file nobody has evidence an agent touched is itself a finding, and dropping
+    it would bias the picture towards agent involvement.
     """
     if not hotspots:
         return []
@@ -167,7 +173,7 @@ async def weight_hotspots(
         # rather than emit a number that violates the module's own contract.
         raise ValueError(f"base risk must be non-negative; got {hotspots[negative[0]]} for {negative[0]}")
 
-    evidence = await authorship_evidence_for(conn, list(hotspots))
+    evidence = await authorship_evidence_for(conn, list(hotspots), project_id=project_id)
     results: list[WeightedRisk] = []
     for path, base_risk in hotspots.items():
         ev = evidence.get(path) or AuthorshipEvidence(

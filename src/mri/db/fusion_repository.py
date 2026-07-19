@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Iterable, Iterator
-from datetime import timezone
+from datetime import datetime, timezone
 from typing import Any
 
 import aiosqlite
@@ -103,24 +103,29 @@ def _limit(value: int) -> int:
     return max(1, min(value, MAX_ROWS))
 
 
-def _iso(value: Any) -> str | None:
-    """Canonical UTC ISO-8601, so stored timestamps sort chronologically.
+def utc_iso(moment: datetime) -> str:
+    """A datetime as canonical UTC ISO-8601.
 
-    Timestamps in this database are compared as strings by SQLite, which is only
-    correct when they share one offset. A commit authored at +09:00 and a scan
-    stored at +00:00 would otherwise sort by their written offset, not their
-    instant — an audit showed that picking a post-decision scan as the baseline
-    and fabricating a delta. Everything is normalised to UTC; a naive datetime
-    is assumed to already be UTC rather than guessed at.
+    Stored timestamps are compared as strings by SQLite, which is only correct
+    when they share one offset. A commit authored at +09:00 and a scan stored at
+    +00:00 would otherwise sort by their written offset, not their instant — an
+    audit showed that picking a post-decision scan as the baseline and
+    fabricating a delta. A naive datetime is taken to already be UTC rather than
+    guessed at. Shared with the consequence loop so both write and compare on the
+    identical footing.
     """
-    tzinfo = getattr(value, "tzinfo", None)
-    if not hasattr(value, "isoformat"):
-        return value
-    if tzinfo is not None:
-        value = value.astimezone(_UTC)
-    elif hasattr(value, "replace") and hasattr(value, "hour"):
-        value = value.replace(tzinfo=_UTC)  # a naive datetime; take it as UTC
-    return value.isoformat()
+    if moment.tzinfo is not None:
+        moment = moment.astimezone(_UTC)
+    else:
+        moment = moment.replace(tzinfo=_UTC)
+    return moment.isoformat()
+
+
+def _iso(value: Any) -> str | None:
+    """Canonical UTC ISO-8601 for storage; passes non-datetimes through."""
+    if isinstance(value, datetime):
+        return utc_iso(value)
+    return value
 
 
 def _confounders(raw: Any, *, row_id: Any) -> list[str]:
@@ -152,9 +157,10 @@ async def upsert_session(conn: aiosqlite.Connection, session: Session) -> Sessio
     await conn.execute(
         """
         INSERT INTO sessions
-            (source, external_id, workspace_path, started_at, ended_at, content_stored)
-        VALUES (?, ?, ?, ?, ?, ?)
+            (source, external_id, project_id, workspace_path, started_at, ended_at, content_stored)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(source, external_id) DO UPDATE SET
+            project_id     = excluded.project_id,
             workspace_path = excluded.workspace_path,
             started_at     = COALESCE(excluded.started_at, sessions.started_at),
             ended_at       = COALESCE(excluded.ended_at, sessions.ended_at),
@@ -163,6 +169,7 @@ async def upsert_session(conn: aiosqlite.Connection, session: Session) -> Sessio
         (
             session.source,
             session.external_id,
+            session.project_id,
             session.workspace_path,
             _iso(session.started_at),
             _iso(session.ended_at),
@@ -248,13 +255,13 @@ async def insert_session_file_touches(
         await conn.executemany(
             """
             INSERT INTO session_file_touches
-                (session_id, event_id, file_path, commit_sha, touch_kind, confidence,
-                 occurred_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+                (session_id, project_id, event_id, file_path, commit_sha, touch_kind,
+                 confidence, occurred_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
-                (t.session_id, t.event_id, t.file_path, t.commit_sha, t.touch_kind,
-                 t.confidence, _iso(t.occurred_at))
+                (t.session_id, t.project_id, t.event_id, t.file_path, t.commit_sha,
+                 t.touch_kind, t.confidence, _iso(t.occurred_at))
                 for t in batch
             ],
         )
@@ -287,11 +294,13 @@ async def insert_session_file_touch(
     cursor = await conn.execute(
         """
         INSERT INTO session_file_touches
-            (session_id, event_id, file_path, commit_sha, touch_kind, confidence, occurred_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+            (session_id, project_id, event_id, file_path, commit_sha, touch_kind,
+             confidence, occurred_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             touch.session_id,
+            touch.project_id,
             touch.event_id,
             touch.file_path,
             touch.commit_sha,
@@ -305,18 +314,20 @@ async def insert_session_file_touch(
 
 
 async def touches_for_file(
-    conn: aiosqlite.Connection, file_path: str, *, limit: int = 200
+    conn: aiosqlite.Connection, file_path: str, *, project_id: int, limit: int = 200
 ) -> list[SessionFileTouch]:
-    """Touches on a file, most recent first.
+    """Touches on a file in one project, most recent first.
 
-    SQLite sorts NULLs last under DESC, so touches with no `occurred_at` — ones
-    not yet correlated to a time — fall to the end and drop off the page once a
-    file has `limit` timestamped touches. That is the intended reading of "most
-    recent": an untimed touch is not recent, it is unplaced.
+    `project_id` is required, not optional: a file path is only unique within a
+    project, and two repos in one database sharing a name like "README.md" would
+    otherwise blend their touches. SQLite sorts NULLs last under DESC, so touches
+    with no `occurred_at` fall to the end — an untimed touch is not recent, it is
+    unplaced.
     """
     cursor = await conn.execute(
-        "SELECT * FROM session_file_touches WHERE file_path = ? ORDER BY occurred_at DESC LIMIT ?",
-        (file_path, _limit(limit)),
+        "SELECT * FROM session_file_touches WHERE project_id = ? AND file_path = ?"
+        " ORDER BY occurred_at DESC LIMIT ?",
+        (project_id, file_path, _limit(limit)),
     )
     return [SessionFileTouch(**dict(r)) for r in await cursor.fetchall()]
 
@@ -327,11 +338,12 @@ async def insert_authorship_share(
     cursor = await conn.execute(
         """
         INSERT INTO authorship_shares
-            (file_path, commit_sha, share_ai, share_human, share_unattributed,
+            (project_id, file_path, commit_sha, share_ai, share_human, share_unattributed,
              method, confidence, computed_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
+            share.project_id,
             share.file_path,
             share.commit_sha,
             share.share_ai,
@@ -347,11 +359,12 @@ async def insert_authorship_share(
 
 
 async def authorship_for_file(
-    conn: aiosqlite.Connection, file_path: str, *, limit: int = 50
+    conn: aiosqlite.Connection, file_path: str, *, project_id: int, limit: int = 50
 ) -> list[AuthorshipShare]:
     cursor = await conn.execute(
-        "SELECT * FROM authorship_shares WHERE file_path = ? ORDER BY computed_at DESC LIMIT ?",
-        (file_path, _limit(limit)),
+        "SELECT * FROM authorship_shares WHERE project_id = ? AND file_path = ?"
+        " ORDER BY computed_at DESC LIMIT ?",
+        (project_id, file_path, _limit(limit)),
     )
     return [AuthorshipShare(**dict(r)) for r in await cursor.fetchall()]
 
@@ -456,11 +469,12 @@ async def insert_decisions_ignoring_duplicates(
 
 
 async def decisions_for_file(
-    conn: aiosqlite.Connection, file_path: str, *, limit: int = 50
+    conn: aiosqlite.Connection, file_path: str, *, project_id: int, limit: int = 50
 ) -> list[Decision]:
     cursor = await conn.execute(
-        "SELECT * FROM decisions WHERE file_path = ? ORDER BY decided_at DESC LIMIT ?",
-        (file_path, _limit(limit)),
+        "SELECT * FROM decisions WHERE project_id = ? AND file_path = ?"
+        " ORDER BY decided_at DESC LIMIT ?",
+        (project_id, file_path, _limit(limit)),
     )
     return [Decision(**dict(r)) for r in await cursor.fetchall()]
 
