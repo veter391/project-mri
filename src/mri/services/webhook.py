@@ -110,14 +110,12 @@ class _delivery_record:
         # can't be entered from a worker thread (its event loop is bound
         # to the main loop). Sync sqlite3 is fine for this simple INSERT.
         def _insert() -> int:
-            import sqlite3
-
             from mri.db.migrator import migrate
-            from mri.db.repository import default_db_path
+            from mri.db.repository import connect_sync, default_db_path
 
             db_path = default_db_path()
             migrate(db_path)
-            conn = sqlite3.connect(str(db_path), isolation_level=None)
+            conn = connect_sync(db_path)
             try:
                 cur = conn.execute(
                     """

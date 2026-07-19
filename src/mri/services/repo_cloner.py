@@ -19,7 +19,6 @@ import os
 import re
 import shutil
 import socket
-import sqlite3
 import subprocess  # nosec B404
 from datetime import datetime, timezone
 from pathlib import Path
@@ -191,13 +190,13 @@ def _record_clone(url: str, local_path: Path, default_branch: str | None = None)
     the row persists even on the CLI ``mri scan <url>`` path.
     """
     from mri.db.migrator import migrate
+    from mri.db.repository import connect_sync
 
     now = datetime.now(timezone.utc).isoformat()
     db_path = default_db_path()
     migrate(db_path)
-    conn = sqlite3.connect(str(db_path), isolation_level=None)
+    conn = connect_sync(db_path)
     try:
-        conn.execute("PRAGMA foreign_keys = ON")
         conn.execute(
             """
             INSERT INTO cloned_repos (url, local_path, default_branch, last_scanned_at, scan_count)

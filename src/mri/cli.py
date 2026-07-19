@@ -552,18 +552,16 @@ def ui(host: str | None, port: int | None, no_serve: bool) -> None:
 @click.option("--project", default=None, help="Filter by project path")
 def list_cmd(limit: int, project: str | None) -> None:
     """List recent scans in the local database."""
-    import sqlite3
 
     from mri.db.migrator import migrate
-    from mri.db.repository import default_db_path
+    from mri.db.repository import connect_sync, default_db_path
 
     db = default_db_path()
     if not db.exists():
         click.echo("  (no scans yet — run `mri scan <path>` first)", err=True)
         return
     migrate(db)
-    conn = sqlite3.connect(str(db), isolation_level=None)
-    conn.row_factory = sqlite3.Row
+    conn = connect_sync(db)
     try:
         if project:
             cur = conn.execute(

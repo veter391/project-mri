@@ -26,13 +26,11 @@ import jwt
 def _sync_conn() -> sqlite3.Connection:
     """Open a synchronous sqlite3 connection with the schema up to date."""
     from mri.db.migrator import migrate
-    from mri.db.repository import default_db_path
+    from mri.db.repository import connect_sync, default_db_path
 
     db_path = default_db_path()
     migrate(db_path)
-    conn = sqlite3.connect(str(db_path), isolation_level=None)
-    conn.row_factory = sqlite3.Row
-    return conn
+    return connect_sync(db_path)
 
 
 # ---------------------------------------------------------------------------
