@@ -16,6 +16,7 @@ from mri.fusion.authorship import (
     authorship_evidence_for,
     weight_hotspots,
 )
+from mri.fusion.consequences import measure_consequence, measure_decision_consequences
 from mri.fusion.decisions import ingest_adrs, ingest_commits, parse_adr
 
 __all__ = [
@@ -24,6 +25,8 @@ __all__ = [
     "authorship_evidence_for",
     "ingest_adrs",
     "ingest_commits",
+    "measure_consequence",
+    "measure_decision_consequences",
     "parse_adr",
     "weight_hotspots",
 ]
