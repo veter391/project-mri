@@ -137,3 +137,33 @@ def test_ast_cache_is_budgeted_by_source_size(tmp_path: Path, caplog, monkeypatc
     assert any("budget_exhausted" in r.message for r in caplog.records), (
         "the cache stopped retaining without saying so"
     )
+
+
+async def test_a_stuck_analyzer_does_not_hang_the_scan(tmp_path: Path, monkeypatch):
+    """The tool scans repositories supplied by whoever calls the API. Nothing
+    bounded how long one file could keep a parser busy, so a stuck analyzer held
+    a scan slot with no recovery short of restarting the process."""
+    import time
+
+    class Wedged(_Stub):
+        name = "wedged"
+
+        def analyze(self, ctx: ScanContext) -> None:  # type: ignore[override]
+            self._start()
+            time.sleep(5)  # longer than the budget below
+            self._set_score(100.0, ["never reached"])
+            self._finish_ok()
+
+    (tmp_path / "a.py").write_text("x = 1\n", encoding="utf-8")
+    monkeypatch.setattr(Scanner, "ANALYZER_TIMEOUT_SECONDS", 0.2)
+    monkeypatch.setattr(Scanner, "ANALYZERS", [Wedged, _analyzer("fine")])
+
+    started = time.perf_counter()
+    report = await Scanner().scan(str(tmp_path))
+    elapsed = time.perf_counter() - started
+
+    assert elapsed < 4, f"the scan waited {elapsed:.1f}s on a wedged analyzer"
+    wedged = next(r for r in report.runs if r.name == "wedged")
+    assert "timed out" in (wedged.error_message or ""), "the timeout was not recorded"
+    # The rest of the scan still produced a report rather than failing outright.
+    assert any(r.name == "fine" and r.score is not None for r in report.runs)

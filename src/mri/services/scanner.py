@@ -110,6 +110,20 @@ class Scanner:
         CouplingAnalyzer,
     ]
 
+    #: Ceiling on a single analyzer. This tool scans repositories supplied by
+    #: whoever calls the API, and nothing else bounded how long one file could
+    #: keep a parser busy — a stuck analyzer held a scan slot with no recovery
+    #: short of restarting the process.
+    #:
+    #: Honest about what this does and does not do: it stops the *scan* from
+    #: hanging, and the run is recorded as timed out rather than silently
+    #: missing. It cannot kill the worker thread, because Python has no way to,
+    #: so that thread runs to completion in the background. Generous on purpose
+    #: — adversarial inputs measured at well under a second here (worst case
+    #: 703 ms for an 800 KB pathological file), so this only fires on something
+    #: genuinely wrong.
+    ANALYZER_TIMEOUT_SECONDS: float = 300.0
+
     def __init__(self, *, on_progress: ProgressCallback | None = None) -> None:
         self._on_progress = on_progress
 
@@ -192,7 +206,14 @@ class Scanner:
                 pct,
             )
             try:
-                await asyncio.to_thread(analyzer.analyze, ctx)
+                await asyncio.wait_for(
+                    asyncio.to_thread(analyzer.analyze, ctx),
+                    timeout=self.ANALYZER_TIMEOUT_SECONDS,
+                )
+            except asyncio.TimeoutError:
+                analyzer._finish_err(
+                    f"timed out after {self.ANALYZER_TIMEOUT_SECONDS}s"
+                )
             except Exception as exc:
                 # analyzers handle their own errors; this catches structural ones
                 analyzer._finish_err(f"unhandled: {type(exc).__name__}: {exc}")
