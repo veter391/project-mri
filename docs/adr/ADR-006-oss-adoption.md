@@ -79,11 +79,51 @@ JWT secret's storage and rotation, the 24-hour token lifetime, and the file
 permissions on the database all guard the same asset and are likelier to be the
 real weak link.
 
+### Declined: PyDriller
+
+Proposed for git mining. It wraps GitPython and materialises per-commit
+modification objects, which means a `git diff` per commit — the exact pattern
+this phase removed, where 36 ms per commit became six minutes on a
+10,000-commit history.
+
+Measured over 30 commits: **54.9 ms per commit against our 5.0 ms**, an 11x
+regression. Adopting it would undo that work to gain a nicer object model.
+
+Correctness is not the differentiator: on a single commit both produce
+**identical** per-file added/deleted counts (4/4 of the shared files; the
+apparent extras were only Windows path separators). A first pass suggested the
+churn totals differed by 2x, but that was an error in my benchmark — PyDriller
+traverses oldest-first while `git log -30` returns newest-first, so the two runs
+covered different commits. The speed comparison stands; the correctness one
+never showed a real difference.
+
+If the fusion layers later need per-modification detail, more format specifiers
+on the existing `git log` will produce it at a fraction of the cost.
+
+### Declined: limits
+
+Proposed to replace the hand-rolled rate limiter. The argument for it was
+genuine and not about speed: my own implementation shipped with two real defects
+(unbounded IP-key growth, no capacity ceiling), which is decent evidence that
+hand-rolling a security-adjacent component is error-prone.
+
+That argument collapsed on inspection. `limits` 5.8.0 works fine on Python 3.14
+with three small pure-Python dependencies, but its `MemoryStorage` retains
+**all 20,000 keys** in a 20,000-distinct-address test — the *same* unbounded
+growth that was the bug worth fixing. It has an internal event expiry but no cap
+on distinct keys, so adopting it would still require the capacity ceiling on
+top, and the library would be buying only the moving-window arithmetic, which is
+a per-key timestamp list filtered by age and readable in eight lines.
+
+Its real value is storage backends — Redis, Memcached — for rate limiting shared
+across processes. This tool is a single local process. Revisit if it ever runs
+as a multi-instance service.
+
 ### Still open
 
-PyDriller, lizard's duplicate-detection features, grimp/import-linter and
-`limits` have not been evaluated yet. Each gets the same treatment: measure or
-research first, adopt only on evidence.
+grimp / import-linter is under evaluation; the question there is whether static
+Python import resolution is worth a second, Python-only code path in a
+multi-language extractor.
 
 ## Consequences
 
