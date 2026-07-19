@@ -14,6 +14,13 @@ from collections import defaultdict
 
 from mri.analyzers.base import BaseAnalyzer, ScanContext
 
+#: Signals are a summary for display, not a data dump. Every list is capped
+#: and the true total is reported beside it, so a truncated view can never be
+#: mistaken for the whole picture. Uncapped, these grew with repository size:
+#: the audit measured a 2 MB report_json on a 12,000-file repo, written to the
+#: database on every scan, unbounded in a watch loop.
+SIGNAL_SAMPLE_LIMIT = 50
+
 
 class ArchitectureAnalyzer(BaseAnalyzer):
     name = "architecture"
@@ -140,7 +147,7 @@ class ArchitectureAnalyzer(BaseAnalyzer):
             self.run.signals = {
                 "module_count": len(modules_view),
                 "total_loc": total_loc,
-                "modules": modules_view,
+                "modules": modules_view[:SIGNAL_SAMPLE_LIMIT],
                 "god_modules": god_modules,
                 "deep_modules": deep,
                 "imbalance_ratio": round(imbalance, 3) if imbalance else 0,

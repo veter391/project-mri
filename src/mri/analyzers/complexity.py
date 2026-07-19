@@ -232,7 +232,8 @@ class ComplexityAnalyzer(BaseAnalyzer):
                 "max_file_loc": max(file_locs) if file_locs else 0,
                 "function_count": len(function_lengths),
                 "median_function_length": median(function_lengths) if function_lengths else 0,
-                "long_files": long_files,
+                "long_file_count": len(long_files),
+                "long_files": long_files[:20],
                 "long_functions": long_functions[:20],
                 "per_language": dict(per_lang),
                 # null (not 0) when no code lines were scanned — a 0.0 here would
@@ -242,6 +243,7 @@ class ComplexityAnalyzer(BaseAnalyzer):
                 # "every function is trivial" are different claims.
                 "median_cyclomatic": median(complexities) if complexities else None,
                 "max_cyclomatic": max(complexities) if complexities else None,
+                "complex_function_count": len(complex_functions),
                 "complex_functions": complex_functions[:20],
             }
             self._finish_ok()

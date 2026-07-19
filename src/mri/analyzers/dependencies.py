@@ -142,7 +142,10 @@ class DependenciesAnalyzer(BaseAnalyzer):
                 "module_count": len(all_modules),
                 "edge_count": sum(len(d) for d in edges.values()),
                 "cycle_count": len(cycles),
-                "cycles_sample": cycles[:5],
+                # Five cycles, but a single SCC can hold thousands of
+                # modules, so the members are capped too.
+                "cycles_sample": [c[:25] for c in cycles[:5]],
+                "largest_cycle_size": max((len(c) for c in cycles), default=0),
                 "god_consumers": god_consumers,
                 "fanin_top": sorted(fanin.items(), key=lambda kv: -kv[1])[:10],
                 "fanout_top": sorted(fanout.items(), key=lambda kv: -kv[1])[:10],
