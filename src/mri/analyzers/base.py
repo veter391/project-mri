@@ -7,6 +7,7 @@ Every analyzer is a small async unit that:
 """
 from __future__ import annotations
 
+import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -15,6 +16,8 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 from mri.models.scan import AnalyzerRun, Finding, ScanStatus, Score
+
+_logger = logging.getLogger("mri.analyzers")
 
 
 @dataclass(slots=True)
@@ -55,12 +58,21 @@ class ScanContext:
     _content: dict[str, str] = field(default_factory=dict, repr=False)
     _trees: dict[tuple[str, str], Any] = field(default_factory=dict, repr=False)
     _content_bytes: int = field(default=0, repr=False)
-    _tree_count: int = field(default=0, repr=False)
+    _tree_source_chars: int = field(default=0, repr=False)
+    _budgets_reported: set[str] = field(default_factory=set, repr=False)
 
     #: Stop retaining file contents past this many characters.
     CONTENT_BUDGET_CHARS: ClassVar[int] = 64 * 1024 * 1024
-    #: Stop retaining parsed trees past this many files.
-    TREE_BUDGET_FILES: ClassVar[int] = 5_000
+    #: Stop retaining parsed trees past this much *source*.
+    #:
+    #: Counted in source characters rather than files because a tree's cost
+    #: tracks the size of what it came from, not the number of paths. A
+    #: file-count budget of 5,000 permitted roughly 950 MiB of ASTs — measured
+    #: at ~195 KiB per tree over ~7 KB of source, so about 28x the source it
+    #: parses — while the content budget beside it allowed 64 MiB. Two budgets
+    #: for the same scan that differ by an order of magnitude are not budgets.
+    #: 8 MiB of source lands in the same neighbourhood as the content cache.
+    TREE_SOURCE_BUDGET_CHARS: ClassVar[int] = 8 * 1024 * 1024
     #: Files larger than this are never read whole.
     MAX_FILE_BYTES: ClassVar[int] = 2 * 1024 * 1024
 
@@ -101,7 +113,30 @@ class ScanContext:
         if self._content_bytes + len(text) <= self.CONTENT_BUDGET_CHARS:
             self._content[rel_path] = text
             self._content_bytes += len(text)
+        else:
+            self._warn_budget_exhausted("content", "CONTENT_BUDGET_CHARS")
         return text
+
+    def _warn_budget_exhausted(self, what: str, setting: str) -> None:
+        """Say so, once, when a cache stops retaining.
+
+        Past the budget every analyzer re-reads and re-parses from scratch —
+        measured at roughly 1,800x for reads and 5,000x for parses. Degrading is
+        the right behaviour; degrading silently is not, because nothing in the
+        report would explain why a slightly larger repository took far longer.
+        """
+        if setting in self._budgets_reported:
+            return
+        self._budgets_reported.add(setting)
+        _logger.warning(
+            "scan.cache.budget_exhausted",
+            extra={
+                "event": "scan.cache.budget_exhausted",
+                "cache": what,
+                "setting": setting,
+                "project": str(self.project_path),
+            },
+        )
 
     def parse_tree(self, rel_path: str, ts_language: str) -> Any | None:
         """Parse a file with tree-sitter once and share the AST.
@@ -126,9 +161,11 @@ class ScanContext:
         except Exception:
             # Malformed source is expected; the caller falls back to regex.
             return None
-        if self._tree_count < self.TREE_BUDGET_FILES:
+        if self._tree_source_chars + len(text) <= self.TREE_SOURCE_BUDGET_CHARS:
             self._trees[key] = tree
-            self._tree_count += 1
+            self._tree_source_chars += len(text)
+        else:
+            self._warn_budget_exhausted("AST", "TREE_SOURCE_BUDGET_CHARS")
         return tree
 
 

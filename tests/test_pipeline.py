@@ -114,3 +114,26 @@ def test_context_carries_seams_for_out_of_tree_inputs(tmp_path: Path):
     ctx.previous_scans.append({"scan_uuid": "older"})
     assert ctx.sources["claude_sessions"][0]["id"] == "abc"
     assert ctx.previous_scans[0]["scan_uuid"] == "older"
+
+
+def test_ast_cache_is_budgeted_by_source_size(tmp_path: Path, caplog, monkeypatch):
+    """A file-count budget let 5,000 trees hold ~950 MiB while the content cache
+    beside it allowed 64 MiB. Trees are budgeted by the source they came from,
+    and exhausting a budget is announced rather than silently degrading."""
+    import logging
+
+    monkeypatch.setattr(ScanContext, "TREE_SOURCE_BUDGET_CHARS", 200)
+    ctx = ScanContext(project_path=tmp_path, branch="main", files=[], git=None)
+
+    body = "import os\n" * 40  # ~400 chars, over the shrunken budget on the 2nd file
+    for name in ("a.py", "b.py", "c.py"):
+        (tmp_path / name).write_text(body, encoding="utf-8")
+
+    with caplog.at_level(logging.WARNING):
+        trees = [ctx.parse_tree(n, "python") for n in ("a.py", "b.py", "c.py")]
+
+    assert all(t is not None for t in trees), "parsing must still work past the budget"
+    assert len(ctx._trees) < 3, "the budget did not stop retention"
+    assert any("budget_exhausted" in r.message for r in caplog.records), (
+        "the cache stopped retaining without saying so"
+    )
