@@ -29,8 +29,8 @@ from datetime import datetime, timedelta
 import aiosqlite
 
 from mri.db import fusion_repository as repo
-from mri.db.fusion_repository import utc_iso
 from mri.models.fusion import Consequence, Decision
+from mri.utils import utc_iso
 
 __all__ = ["measure_consequence", "measure_decision_consequences"]
 

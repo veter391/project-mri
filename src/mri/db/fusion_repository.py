@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Iterable, Iterator
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
 import aiosqlite
@@ -29,8 +29,7 @@ from mri.models.fusion import (
     SessionEvent,
     SessionFileTouch,
 )
-
-_UTC = timezone.utc
+from mri.utils import utc_iso
 
 __all__ = [
     "CrossProjectSessionError",
@@ -104,28 +103,17 @@ def _limit(value: int) -> int:
     return max(1, min(value, MAX_ROWS))
 
 
-def utc_iso(moment: datetime) -> str:
-    """A datetime as canonical UTC ISO-8601.
-
-    Stored timestamps are compared as strings by SQLite, which is only correct
-    when they share one offset. A commit authored at +09:00 and a scan stored at
-    +00:00 would otherwise sort by their written offset, not their instant — an
-    audit showed that picking a post-decision scan as the baseline and
-    fabricating a delta. A naive datetime is taken to already be UTC rather than
-    guessed at. Shared with the consequence loop so both write and compare on the
-    identical footing.
-    """
-    if moment.tzinfo is not None:
-        moment = moment.astimezone(_UTC)
-    else:
-        moment = moment.replace(tzinfo=_UTC)
-    return moment.isoformat()
-
-
 def _iso(value: Any) -> str | None:
-    """Canonical UTC ISO-8601 for storage; passes non-datetimes through."""
+    """Serialise a timestamp for storage: datetimes as canonical UTC, other
+    date-like values by their own isoformat, everything else unchanged.
+
+    A bare `date` (which has `isoformat` but no tz) is stringified rather than
+    passed through, because Python 3.14 dropped the default sqlite3 date adapter
+    and a raw `date` would otherwise fail to bind."""
     if isinstance(value, datetime):
         return utc_iso(value)
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
     return value
 
 
