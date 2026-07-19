@@ -278,3 +278,177 @@ async def test_logs_are_matched_by_recorded_cwd_not_by_directory_name(
 def test_the_parser_survives_a_log_with_no_sessions(tmp_path: Path, repo_root: Path):
     log = _log(tmp_path / "s.jsonl", [{"type": "system", "subtype": "init"}])
     assert claude_code.parse_log(log, repo_root=repo_root) is None
+
+
+# ---------------------------------------------------------------------------
+# What the audits found
+# ---------------------------------------------------------------------------
+
+
+async def test_a_rewritten_log_is_re_read_not_silently_skipped(
+    db: Path, tmp_path: Path, repo_root: Path
+):
+    """The watermark assumed logs only ever grow. A log rewritten in place —
+    crash recovery, a checkpoint re-emit, an editor — put different content
+    where the previous run considered the work done, and the edits it now
+    described were lost while the run reported nothing had changed. Reproduced
+    against a real database before this check existed."""
+    cwd = str(repo_root)
+    first = [
+        _turn(1, "assistant", cwd, [_use("Write", str(repo_root / "src" / "a.py"), "u1")]),
+        _turn(2, "user", cwd, [_result("u1")]),
+        _turn(3, "assistant", cwd, [{"type": "text", "text": "nothing to do"}]),
+    ]
+    log = _log(tmp_path / "s.jsonl", first)
+
+    async with get_connection(db) as conn:
+        await ingest_log(conn, log, repo_root=repo_root)
+
+        # Turn 3 is rewritten: it is now a real edit of a different file.
+        rewritten = list(first)
+        rewritten[2] = _turn(
+            3, "assistant", cwd, [_use("Write", str(repo_root / "src" / "b.py"), "u9")]
+        )
+        rewritten.append(_turn(4, "user", cwd, [_result("u9")]))
+        _log(log, rewritten)
+
+        result = await ingest_log(conn, log, repo_root=repo_root)
+        assert result.rewritten == 1, "the rewrite must be noticed and reported"
+        touches = await repo.touches_for_file(conn, "src/b.py")
+        cursor = await conn.execute("SELECT count(*) FROM session_events")
+        stored = (await cursor.fetchone())[0]
+
+    assert len(touches) == 1, "the edit the rewritten log describes must be recovered"
+    assert stored == 4, "re-reading must replace the stale copy, not stack on top of it"
+
+
+def test_a_turn_is_fingerprinted_by_what_it_did_not_only_what_it_said(
+    tmp_path: Path, repo_root: Path
+):
+    """Two turns can both carry no prose while writing different files. Hashing
+    the text alone would make them identical, and a rewrite between them
+    invisible."""
+    a = _log(tmp_path / "a.jsonl", [
+        _turn(1, "assistant", str(repo_root), [_use("Write", str(repo_root / "src" / "a.py"), "u1")]),
+    ])
+    b = _log(tmp_path / "b.jsonl", [
+        _turn(1, "assistant", str(repo_root), [_use("Write", str(repo_root / "src" / "b.py"), "u1")]),
+    ])
+    left = claude_code.parse_log(a, repo_root=repo_root)
+    right = claude_code.parse_log(b, repo_root=repo_root)
+    assert left.turns[0].content_hash != right.turns[0].content_hash
+
+
+def test_records_from_another_session_are_dropped_not_merged(tmp_path: Path, repo_root: Path):
+    """One file, one session. A second id means the file was concatenated or
+    corrupted, and merging would credit one session with another's work."""
+    cwd = str(repo_root)
+    foreign = _turn(2, "assistant", cwd, [_use("Write", str(repo_root / "src" / "b.py"), "u2")])
+    foreign["sessionId"] = "someone-else"
+    log = _log(tmp_path / "s.jsonl", [
+        _turn(1, "assistant", cwd, [_use("Write", str(repo_root / "src" / "a.py"), "u1")]),
+        foreign,
+        _turn(3, "user", cwd, [_result("u1"), _result("u2")]),
+    ])
+    parsed = claude_code.parse_log(log, repo_root=repo_root)
+    assert parsed.external_id == "sess-1"
+    assert parsed.foreign_records == 1
+    assert [t.file_path for t in parsed.touches] == ["src/a.py"]
+
+
+def test_a_reused_tool_call_id_keeps_both_touches(tmp_path: Path, repo_root: Path):
+    """Overwriting the pending entry would drop the earlier call silently. The
+    earlier one is kept at unknown outcome, because its result is now
+    unknowable — which is not the same as evidence that nothing happened."""
+    cwd = str(repo_root)
+    log = _log(tmp_path / "s.jsonl", [
+        _turn(1, "assistant", cwd, [_use("Write", str(repo_root / "src" / "a.py"), "dup")]),
+        _turn(2, "assistant", cwd, [_use("Write", str(repo_root / "src" / "b.py"), "dup")]),
+        _turn(3, "user", cwd, [_result("dup")]),
+    ])
+    parsed = claude_code.parse_log(log, repo_root=repo_root)
+    assert parsed.duplicate_call_ids == 1
+    assert sorted(t.file_path for t in parsed.touches) == ["src/a.py", "src/b.py"]
+
+
+def test_failed_calls_are_counted_even_though_they_are_not_touches(
+    tmp_path: Path, repo_root: Path
+):
+    """"Half this session failed its edits" is a fact about the session worth
+    having, even though none of those calls changed a file."""
+    cwd = str(repo_root)
+    log = _log(tmp_path / "s.jsonl", [
+        _turn(1, "assistant", cwd, [
+            _use("Edit", str(repo_root / "src" / "a.py"), "u1"),
+            _use("Edit", str(repo_root / "src" / "b.py"), "u2"),
+        ]),
+        _turn(2, "user", cwd, [_result("u1", error=True), _result("u2", error=True)]),
+    ])
+    parsed = claude_code.parse_log(log, repo_root=repo_root)
+    assert parsed.touches == []
+    assert parsed.failed_calls == 2
+
+
+def test_an_absurdly_long_line_is_counted_not_decoded(tmp_path: Path, repo_root: Path):
+    """A turn is prose and tool arguments, not eight megabytes. A single 500 MB
+    line was measured taking the process to a 1.5 GB peak."""
+    path = tmp_path / "s.jsonl"
+    huge = json.dumps({
+        "type": "user", "sessionId": "sess-1", "cwd": str(repo_root),
+        "message": {"content": [{"type": "text", "text": "x" * (claude_code.MAX_LINE_BYTES + 10)}]},
+    })
+    sane = json.dumps(_turn(1, "user", str(repo_root), [{"type": "text", "text": "hi"}]))
+    path.write_text(huge + "\n" + sane + "\n", encoding="utf-8")
+
+    parsed = claude_code.parse_log(path, repo_root=repo_root)
+    assert parsed.unreadable_lines == 1
+    assert len(parsed.turns) == 1, "the sane record after it must still be read"
+
+
+def test_one_unreadable_candidate_does_not_stop_discovery(tmp_path: Path, repo_root: Path):
+    """That directory is not ours. It can hold a locked file, a cloud-storage
+    placeholder, or a directory that happens to end in .jsonl — and one of those
+    must not stop every other log from being read."""
+    home = tmp_path / "home"
+    projects = home / ".claude" / "projects" / "p"
+    projects.mkdir(parents=True)
+    (projects / "aaa-a-directory.jsonl").mkdir()  # sorts first, so it is hit first
+    _log(projects / "zzz-real.jsonl", [
+        _turn(1, "assistant", str(repo_root), [_use("Write", str(repo_root / "src" / "a.py"), "u1")]),
+        _turn(2, "user", str(repo_root), [_result("u1")]),
+    ])
+    found = claude_code.logs_for_workspace(repo_root, home=home)
+    assert [p.name for p in found] == ["zzz-real.jsonl"]
+
+
+async def test_a_racing_ingest_fails_loudly_rather_than_duplicating(
+    db: Path, tmp_path: Path, repo_root: Path
+):
+    """UNIQUE (session_id, seq) is what stops the duplication. This turns the
+    resulting bare sqlite error into one that names the cause and the rule."""
+    from mri.ingest.service import ConcurrentIngestError
+
+    cwd = str(repo_root)
+    log = _log(tmp_path / "s.jsonl", [
+        _turn(1, "assistant", cwd, [_use("Write", str(repo_root / "src" / "a.py"), "u1")]),
+        _turn(2, "user", cwd, [_result("u1")]),
+    ])
+    async with get_connection(db) as conn:
+        await ingest_log(conn, log, repo_root=repo_root)
+        # The state a concurrent run leaves mid-flight: rows present, but the
+        # fingerprint no longer matches, so this run believes it must re-read.
+        await conn.execute("UPDATE session_events SET content_hash = 'stale' WHERE seq = 2")
+        await conn.commit()
+
+        async def racing_forget(*_args, **_kwargs):
+            return None  # the other writer has not finished clearing yet
+
+        import mri.ingest.service as service
+
+        original = service._forget_session
+        service._forget_session = racing_forget
+        try:
+            with pytest.raises(ConcurrentIngestError, match="serialised per session"):
+                await ingest_log(conn, log, repo_root=repo_root)
+        finally:
+            service._forget_session = original

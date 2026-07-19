@@ -51,6 +51,14 @@ CONFIDENCE_REPORTED = 0.9
 #: The call was issued and no result was recorded. It may have succeeded.
 CONFIDENCE_OUTCOME_UNKNOWN = 0.5
 
+#: Longest line the parser will try to decode. A turn is prose and tool
+#: arguments; it is not eight megabytes. A single 500 MB line was measured
+#: taking the process to a 1.5 GB peak — the raw string, the decoded object and
+#: the retained content all alive at once. Past this the line is counted as
+#: unreadable, which is what it is: something this parser cannot honestly say
+#: it understood.
+MAX_LINE_BYTES = 8 * 1024 * 1024
+
 
 @dataclass(slots=True)
 class ParsedTurn:
@@ -84,6 +92,15 @@ class ParsedSession:
     #: than swallowed, because a large count means the parser is wrong about
     #: the format and every number derived from it is suspect.
     unreadable_lines: int = 0
+    #: Tool calls whose result was an error. They changed nothing, so they are
+    #: not touches — but the count is reported, because "this session failed
+    #: half its edits" is a fact about the session worth having.
+    failed_calls: int = 0
+    #: Records belonging to a different session that appeared in this file.
+    #: Should be zero; a non-zero count means the file is not what we think.
+    foreign_records: int = 0
+    #: Tool calls reusing an id already awaiting a result. Also should be zero.
+    duplicate_call_ids: int = 0
 
 
 def _parse_time(raw: Any) -> datetime | None:
@@ -105,6 +122,30 @@ def _content_parts(record: dict) -> list[dict]:
     return []
 
 
+def _fingerprint(record: dict) -> str:
+    """A hash identifying what a turn actually did.
+
+    Hashing the prose alone is not enough: two turns can both carry no text
+    while calling different tools on different files. A rewritten log would
+    then look unchanged at that position, and the edit it now describes would
+    be lost — measured, not hypothesised. So the fingerprint covers the whole
+    message payload, tool inputs included.
+
+    It stays a hash, so it identifies a turn without retaining what was said.
+    """
+    import hashlib
+
+    message = record.get("message")
+    payload = message.get("content") if isinstance(message, dict) else None
+    if payload is None:
+        return ""
+    try:
+        canonical = json.dumps(payload, sort_keys=True, default=str)
+    except (TypeError, ValueError):  # pragma: no cover - json handles our shapes
+        canonical = repr(payload)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
 def _text_of(record: dict) -> str:
     """Flatten a turn to text, for hashing and optional storage."""
     message = record.get("message")
@@ -121,31 +162,57 @@ def _text_of(record: dict) -> str:
     return ""
 
 
-def _relative_within(raw_path: str, root: Path) -> str | None:
+def _relative_within(raw_path: str, root: Path, cache: dict[str, str | None]) -> str | None:
     """Repo-relative path, or None if the file is not in this repository.
 
     A session ranges across a machine — other repositories, temp files, the
     user's home. Only what is inside the project being scanned can be attributed
     to it, and a path that is merely similar is not the same path.
+
+    A log mentions the same handful of files hundreds of times, and `resolve()`
+    touches the filesystem on every call — measured at 227 s for a million
+    records. The answer for a given raw path never changes within one parse, so
+    it is computed once.
     """
+    if raw_path in cache:
+        return cache[raw_path]
     try:
         candidate = Path(raw_path).resolve()
+        relative: str | None = candidate.relative_to(root).as_posix()
     except (OSError, ValueError):
-        return None
-    try:
-        return candidate.relative_to(root).as_posix()
-    except ValueError:
-        return None
+        relative = None
+    cache[raw_path] = relative
+    return relative
 
 
 def iter_records(log: Path) -> Iterator[tuple[dict, bool]]:
     """Yield (record, ok) per line, streaming.
 
-    Logs reach tens of megabytes; they are never read whole. A line that does
-    not parse yields ({}, False) so the caller can count it.
+    Logs reach tens of megabytes; they are never read whole. A line that cannot
+    be decoded yields ({}, False) so the caller can count it.
+
+    A log that cannot be opened at all yields nothing. The directory this scans
+    is not ours: it can hold a file another process has locked, a cloud-storage
+    placeholder, a permission-denied file, or a directory that happens to end in
+    `.jsonl`. One of those must not stop every other log from being read.
     """
-    with log.open(encoding="utf-8", errors="replace") as handle:
-        for line in handle:
+    try:
+        handle = log.open(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        logger.warning("skipping unreadable session log %s: %s", log.name, exc)
+        return
+    with handle:
+        while True:
+            try:
+                line = handle.readline()
+            except OSError as exc:  # the file went away mid-read
+                logger.warning("stopped reading %s: %s", log.name, exc)
+                return
+            if not line:
+                return
+            if len(line) > MAX_LINE_BYTES:
+                yield {}, False
+                continue
             line = line.strip()
             if not line:
                 continue
@@ -165,22 +232,30 @@ def parse_log(log: Path, *, repo_root: Path, store_content: bool = False) -> Par
     stored with `content=None` and its hash, which is enough to correlate and
     deduplicate turns without keeping what was said.
     """
-    import hashlib
-
     root = repo_root.resolve()
     session: ParsedSession | None = None
     seq = 0
     # tool_use_id -> (seq, file_path, touch_kind, occurred_at), awaiting its result.
     pending: dict[str, tuple[int, str, str, datetime | None]] = {}
-    errored: set[str] = set()
+    path_cache: dict[str, str | None] = {}
+
+    # Counted before the session exists as well as after: an unreadable line can
+    # come before the first valid record, and dropping it there would hide
+    # exactly the case where the parser has misread the file from the start.
+    unreadable = 0
 
     for record, ok in iter_records(log):
         if not ok:
-            if session is not None:
-                session.unreadable_lines += 1
+            unreadable += 1
             continue
 
         external_id = record.get("sessionId")
+        if session is not None and isinstance(external_id, str) and external_id                 and external_id != session.external_id:
+            # One file, one session. A second id means the file was concatenated
+            # or corrupted; merging them would attribute one session's work to
+            # another, so the records are dropped and counted.
+            session.foreign_records += 1
+            continue
         if session is None:
             if not isinstance(external_id, str) or not external_id:
                 continue
@@ -209,8 +284,8 @@ def parse_log(log: Path, *, repo_root: Path, store_content: bool = False) -> Par
             if not isinstance(use_id, str):
                 continue
             if part.get("is_error"):
-                errored.add(use_id)
-                pending.pop(use_id, None)
+                if pending.pop(use_id, None) is not None:
+                    session.failed_calls += 1
                 continue
             waiting = pending.pop(use_id, None)
             if waiting is not None:
@@ -230,7 +305,7 @@ def parse_log(log: Path, *, repo_root: Path, store_content: bool = False) -> Par
             role="assistant" if record.get("type") == "assistant" else "user",
             kind="message",
             content=text if (store_content and text) else None,
-            content_hash=hashlib.sha256(text.encode("utf-8")).hexdigest() if text else "",
+            content_hash=_fingerprint(record),
             occurred_at=occurred_at,
         ))
 
@@ -243,11 +318,20 @@ def parse_log(log: Path, *, repo_root: Path, store_content: bool = False) -> Par
             raw_path = (part.get("input") or {}).get("file_path")
             if not isinstance(raw_path, str):
                 continue
-            relative = _relative_within(raw_path, root)
+            relative = _relative_within(raw_path, root, path_cache)
             if relative is None:
                 continue  # another repository, a temp file, somewhere else
             use_id = part.get("id")
             if isinstance(use_id, str):
+                if use_id in pending:
+                    # Reusing an id would silently overwrite the earlier call.
+                    # Keep both: the first is recorded now, at unknown outcome.
+                    earlier_seq, earlier_path, earlier_kind, earlier_time = pending[use_id]
+                    session.duplicate_call_ids += 1
+                    session.touches.append(ParsedTouch(
+                        seq=earlier_seq, file_path=earlier_path, touch_kind=earlier_kind,
+                        confidence=CONFIDENCE_OUTCOME_UNKNOWN, occurred_at=earlier_time,
+                    ))
                 pending[use_id] = (seq, relative, touch_kind, occurred_at)
             else:
                 session.touches.append(ParsedTouch(
@@ -257,6 +341,7 @@ def parse_log(log: Path, *, repo_root: Path, store_content: bool = False) -> Par
 
     if session is None:
         return None
+    session.unreadable_lines = unreadable
 
     # Calls that never got a result. The tool was asked to do it; whether it did
     # is unknown, and the confidence says so rather than the record being dropped.

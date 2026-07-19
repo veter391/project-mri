@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Sequence
+from collections.abc import Iterable, Iterator
 from typing import Any
 
 import aiosqlite
@@ -55,6 +55,13 @@ logger = logging.getLogger(__name__)
 #: the call site, because there will be more than one call site.
 MAX_ROWS = 5_000
 
+#: Rows per executemany during bulk ingest. The whole batch used to be
+#: materialised at once: a real 88,824-turn session measured a 132.6 MB peak,
+#: five times the parse itself, purely from building every model up front.
+#: Chunking bounds that while keeping one transaction, so the insert is still
+#: all-or-nothing.
+INSERT_CHUNK = 2_000
+
 #: Stored when `confounders` cannot be parsed. An empty list would read as "no
 #: alternative explanations were considered", which is a claim, and the wrong
 #: one — the caveat on the finding is damaged, not absent, and a reader has to
@@ -74,6 +81,17 @@ _EVENTS_WITHOUT_CONTENT = (
     " occurred_at, created_at"
     " FROM session_events WHERE session_id = ? ORDER BY seq LIMIT ?"
 )
+
+
+def _chunks(items: Iterable[Any], size: int) -> Iterator[list[Any]]:
+    batch: list[Any] = []
+    for item in items:
+        batch.append(item)
+        if len(batch) >= size:
+            yield batch
+            batch = []
+    if batch:
+        yield batch
 
 
 def _limit(value: int) -> int:
@@ -171,7 +189,7 @@ async def insert_session_event(
 
 
 async def insert_session_events(
-    conn: aiosqlite.Connection, events: Sequence[SessionEvent]
+    conn: aiosqlite.Connection, events: Iterable[SessionEvent]
 ) -> int:
     """Insert many turns in one transaction.
 
@@ -180,43 +198,49 @@ async def insert_session_events(
     in a single transaction. The single-row writers stay as they are — they are
     correct for interactive use, where a commit per call is the point.
     """
-    if not events:
-        return 0
-    await conn.executemany(
-        """
-        INSERT INTO session_events
-            (session_id, seq, role, kind, content, content_hash, occurred_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        """,
-        [
-            (e.session_id, e.seq, e.role, e.kind, e.content, e.content_hash, _iso(e.occurred_at))
-            for e in events
-        ],
-    )
-    await conn.commit()
-    return len(events)
+    written = 0
+    for batch in _chunks(events, INSERT_CHUNK):
+        await conn.executemany(
+            """
+            INSERT INTO session_events
+                (session_id, seq, role, kind, content, content_hash, occurred_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (e.session_id, e.seq, e.role, e.kind, e.content, e.content_hash,
+                 _iso(e.occurred_at))
+                for e in batch
+            ],
+        )
+        written += len(batch)
+    if written:
+        await conn.commit()
+    return written
 
 
 async def insert_session_file_touches(
-    conn: aiosqlite.Connection, touches: Sequence[SessionFileTouch]
+    conn: aiosqlite.Connection, touches: Iterable[SessionFileTouch]
 ) -> int:
     """Insert many file touches in one transaction. See `insert_session_events`."""
-    if not touches:
-        return 0
-    await conn.executemany(
-        """
-        INSERT INTO session_file_touches
-            (session_id, event_id, file_path, commit_sha, touch_kind, confidence, occurred_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        """,
-        [
-            (t.session_id, t.event_id, t.file_path, t.commit_sha, t.touch_kind,
-             t.confidence, _iso(t.occurred_at))
-            for t in touches
-        ],
-    )
-    await conn.commit()
-    return len(touches)
+    written = 0
+    for batch in _chunks(touches, INSERT_CHUNK):
+        await conn.executemany(
+            """
+            INSERT INTO session_file_touches
+                (session_id, event_id, file_path, commit_sha, touch_kind, confidence,
+                 occurred_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (t.session_id, t.event_id, t.file_path, t.commit_sha, t.touch_kind,
+                 t.confidence, _iso(t.occurred_at))
+                for t in batch
+            ],
+        )
+        written += len(batch)
+    if written:
+        await conn.commit()
+    return written
 
 
 async def events_for_session(
