@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 from collections import Counter, defaultdict
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from git.exc import GitCommandError
@@ -60,23 +60,12 @@ class GitHistoryAnalyzer(BaseAnalyzer):
                     branch = git.active_branch.name
                 except Exception:  # nosem: bandit  # detached HEAD or unborn branch
                     branch = "HEAD"
-            commits = list(git.iter_commits(branch, max_count=self.MAX_COMMITS))
-            if not commits:
-                self._set_score(50.0, ["no commits found on branch " + ctx.branch])
-                self._add_finding(
-                    severity="info",
-                    category="empty_history",
-                    title="No commits found",
-                    description=f"Branch {ctx.branch} has no commits. Nothing to analyze.",
-                )
-                self._finish_ok()
-                return
-
             # Per-file: total churn (insertions + deletions), commit count, authors
             file_churn: dict[str, int] = Counter()
             file_commits: dict[str, int] = Counter()
             file_authors: dict[str, set[str]] = defaultdict(set)
             author_total: Counter[str] = Counter()
+            commit_dates: list[datetime] = []
 
             self._collect_churn(
                 git,
@@ -86,7 +75,19 @@ class GitHistoryAnalyzer(BaseAnalyzer):
                 file_commits=file_commits,
                 file_authors=file_authors,
                 author_total=author_total,
+                commit_dates=commit_dates,
             )
+
+            if not commit_dates:
+                self._set_score(50.0, ["no commits found on branch " + ctx.branch])
+                self._add_finding(
+                    severity="info",
+                    category="empty_history",
+                    title="No commits found",
+                    description=f"Branch {ctx.branch} has no commits. Nothing to analyze.",
+                )
+                self._finish_ok()
+                return
 
             # --- Hotspots (files with high churn AND many commits) ---
             hotspots = []
@@ -153,7 +154,7 @@ class GitHistoryAnalyzer(BaseAnalyzer):
                 )
 
             # --- Cadence (last 90 days vs prior 90 days) ---
-            cadence = self._cadence(commits)
+            cadence = self._cadence(commit_dates)
 
             # --- Compose score ---
             score = 100.0
@@ -188,7 +189,7 @@ class GitHistoryAnalyzer(BaseAnalyzer):
 
             self._set_score(max(0.0, score), contributors)
             self.run.signals = {
-                "commit_count": len(commits),
+                "commit_count": len(commit_dates),
                 "files_touched": len(file_churn),
                 "authors": len(author_total),
                 "bus_factor": bus_factor,
@@ -217,12 +218,16 @@ class GitHistoryAnalyzer(BaseAnalyzer):
         file_commits: dict[str, int],
         file_authors: dict[str, set[str]],
         author_total: dict[str, int],
+        commit_dates: list[datetime],
     ) -> None:
         """Accumulate per-file churn from a single `git log --numstat`.
 
         GitPython's `commit.stats` shells out to `git diff` once per commit —
         measured at 36 ms each, which is six minutes on a 10,000-commit history.
         One `git log` covering the whole range costs a single process.
+
+        The commit dates come from the same output, so cadence and the commit
+        count no longer need a second walk through `iter_commits`.
         """
         # `git` is a GitPython Repo; the raw command namespace is `repo.git`.
         try:
@@ -230,7 +235,7 @@ class GitHistoryAnalyzer(BaseAnalyzer):
                 f"-{cls.MAX_COMMITS}",
                 "--numstat",
                 "--no-renames",
-                f"--format={cls._REC}%H{cls._FLD}%ae{cls._FLD}%an",
+                f"--format={cls._REC}%H{cls._FLD}%ae{cls._FLD}%an{cls._FLD}%cI",
                 branch,
             )
         except GitCommandError as exc:
@@ -255,6 +260,11 @@ class GitHistoryAnalyzer(BaseAnalyzer):
             if len(fields) < 3:
                 continue
             email, name = fields[1], fields[2]
+            if len(fields) > 3:
+                try:
+                    commit_dates.append(datetime.fromisoformat(fields[3]))
+                except ValueError:
+                    pass
             author = (email or name or "unknown").lower()
             author_total[author] = author_total.get(author, 0) + 1
 
@@ -276,15 +286,21 @@ class GitHistoryAnalyzer(BaseAnalyzer):
                 file_authors[path_str].add(author)
 
     @staticmethod
-    def _cadence(commits: list) -> dict:
-        if not commits:
+    def _cadence(commit_dates: list[datetime]) -> dict:
+        """Commit rhythm over the last two 90-day windows.
+
+        Takes dates rather than GitPython commit objects: they come from the
+        same `git log` as the churn, so the analyzer walks history once.
+        """
+        if not commit_dates:
             return {}
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         last_90 = 0
         prior_90 = 0
-        for c in commits:
-            d = c.committed_datetime.replace(tzinfo=None)
-            delta_days = (now - d).days
+        for committed_at in commit_dates:
+            if committed_at.tzinfo is None:
+                committed_at = committed_at.replace(tzinfo=timezone.utc)
+            delta_days = (now - committed_at).days
             if delta_days <= 90:
                 last_90 += 1
             elif delta_days <= 180:
