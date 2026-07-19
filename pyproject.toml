@@ -36,7 +36,10 @@ dependencies = [
     "click>=8.1",
     "httpx>=0.27",
     "tree-sitter>=0.22",
-    "tree-sitter-language-pack>=1.10",  # maintained successor to tree-sitter-languages; ships 3.12–3.14 wheels
+    # Maintained successor to tree-sitter-languages; ships 3.12-3.14 wheels.
+    "tree-sitter-language-pack>=1.10",
+    # Cyclomatic complexity across 27 languages. Pure Python, two small deps.
+    "lizard>=1.17",
     "jinja2>=3.1",
     "websockets>=12.0",
     "pyyaml>=6.0",

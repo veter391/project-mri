@@ -3,6 +3,7 @@
 Computes:
   - LOC distribution (per file)
   - Function size (tree-sitter for Python/JS/Go/Rust/TS)
+  - Cyclomatic complexity per function (lizard, 27 languages)
   - Long files (>500 LOC), long functions (>60 LOC)
   - Comment ratio (proxy for documentation effort)
   - Avg function length per module
@@ -18,6 +19,14 @@ from statistics import median
 from typing import Any
 
 from mri.analyzers.base import BaseAnalyzer, ScanContext
+
+try:
+    import lizard as _lizard
+
+    _HAS_LIZARD = True
+except Exception:  # pragma: no cover - only when the optional wheel is absent
+    _HAS_LIZARD = False
+
 from mri.analyzers.parsing import HAS_TREE_SITTER as _HAS_TS
 from mri.analyzers.parsing import language_for_extension
 
@@ -27,14 +36,42 @@ _PY_COMMENT = re.compile(r"^\s*#.*$", re.MULTILINE)
 _C_LINE_COMMENT = re.compile(r"^\s*//.*$", re.MULTILINE)
 
 
+#: Cyclomatic complexity above which a function is worth flagging. 10 is the
+#: long-standing convention from McCabe's original paper and every linter since.
+COMPLEX_FN_CC = 10
+
 LONG_FILE_LOC = 500
 LONG_FILE_CRIT = 1500
 LONG_FN_LINES = 60
 
 
+#: Extensions lizard parses into functions. It decides support internally and
+#: returns nothing for the rest, but "nothing" still costs real time — markdown
+#: alone took 325 ms across this repository to yield one spurious function.
+LIZARD_EXTS = frozenset({
+    ".py", ".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", ".go", ".rs", ".java",
+    ".c", ".h", ".cpp", ".cc", ".hpp", ".cs", ".swift", ".php", ".rb", ".kt", ".scala",
+})
+
+
+def _functions_of(rel_path: str, source: str) -> list:
+    """Functions with their cyclomatic complexity, or nothing.
+
+    lizard decides support by file extension and simply returns no functions for
+    anything it does not parse, so an unsupported or malformed file costs a
+    result with an empty list rather than an exception.
+    """
+    if not _HAS_LIZARD or Path(rel_path).suffix.lower() not in LIZARD_EXTS:
+        return []
+    try:
+        return list(_lizard.analyze_file.analyze_source_code(rel_path, source).function_list)
+    except Exception:
+        return []
+
+
 class ComplexityAnalyzer(BaseAnalyzer):
     name = "complexity"
-    description = "File size, function length, comment ratio"
+    description = "File size, function length, cyclomatic complexity, comment ratio"
     score_label = "complexity_health"
     weight = 1.0
 
@@ -46,6 +83,8 @@ class ComplexityAnalyzer(BaseAnalyzer):
             comment_lines_total = 0
             code_lines_total = 0
             function_lengths: list[int] = []
+            complexities: list[int] = []
+            complex_functions: list[dict] = []
             file_locs: list[int] = []
             per_lang: dict[str, dict[str, int]] = defaultdict(lambda: {"files": 0, "loc": 0})
 
@@ -60,6 +99,25 @@ class ComplexityAnalyzer(BaseAnalyzer):
                 if loc > LONG_FILE_LOC:
                     sev = "high" if loc > LONG_FILE_CRIT else "medium"
                     long_files.append({"path": rel, "loc": loc})
+
+                # Cyclomatic complexity, via lizard. The README has advertised
+                # this metric since before it existed and nothing computed it.
+                # lizard is pure Python, covers 27 languages, and accepts source
+                # text directly, so it reads from the shared cache rather than
+                # opening the file again.
+                if _HAS_LIZARD:
+                    source = ctx.read_text(rel)
+                    if source:
+                        for fn in _functions_of(rel, source):
+                            complexities.append(fn.cyclomatic_complexity)
+                            if fn.cyclomatic_complexity > COMPLEX_FN_CC:
+                                complex_functions.append({
+                                    "path": rel,
+                                    "fn": fn.name,
+                                    "cc": fn.cyclomatic_complexity,
+                                    "line": fn.start_line,
+                                    "lines": fn.length,
+                                })
 
                 # Function-level scan if tree-sitter available
                 if _HAS_TS:
@@ -130,6 +188,23 @@ class ComplexityAnalyzer(BaseAnalyzer):
                     data=lfn,
                 )
 
+            # Findings — cyclomatic complexity
+            for cf in sorted(complex_functions, key=lambda x: -x["cc"])[:10]:
+                self._add_finding(
+                    severity="high" if cf["cc"] > 20 else "medium",
+                    category="high_complexity",
+                    title=f"Complex function: {cf['fn']}() in {cf['path']} (CC {cf['cc']})",
+                    description=(
+                        f"Cyclomatic complexity {cf['cc']} means {cf['cc']} independent paths "
+                        f"through {cf['fn']}. Each one is a case a reader has to hold in mind "
+                        f"and a test has to cover. Extract the branches into named helpers."
+                    ),
+                    target_path=cf["path"],
+                    target_symbol=cf["fn"],
+                    score=min(100.0, cf["cc"] * 4),
+                    data=cf,
+                )
+
             # Score
             score = 100.0
             contributors: list[str] = []
@@ -143,6 +218,15 @@ class ComplexityAnalyzer(BaseAnalyzer):
                 pen = min(25.0, len(long_functions) * 2)
                 score -= pen
                 contributors.append(f"{len(long_functions)} functions > {LONG_FN_LINES} lines (-{pen:.1f})")
+            if complex_functions:
+                pen = min(20.0, len(complex_functions) * 1.5)
+                score -= pen
+                contributors.append(
+                    f"{len(complex_functions)} functions with cyclomatic complexity > "
+                    f"{COMPLEX_FN_CC} (-{pen:.1f})"
+                )
+            elif complexities:
+                contributors.append(f"all functions at or under cyclomatic complexity {COMPLEX_FN_CC}")
             # Comment ratio is only meaningful when we actually counted code
             # lines. Without tree-sitter no lines are scanned, so a 0/0 -> 0
             # ratio must NOT trigger a spurious penalty on every project.
@@ -172,6 +256,11 @@ class ComplexityAnalyzer(BaseAnalyzer):
                 # null (not 0) when no code lines were scanned — a 0.0 here would
                 # falsely read as "documented nothing" rather than "not measured".
                 "comment_ratio": round(comment_ratio, 4) if code_lines_total > 0 else None,
+                # null rather than 0 when lizard is unavailable: not measured and
+                # "every function is trivial" are different claims.
+                "median_cyclomatic": median(complexities) if complexities else None,
+                "max_cyclomatic": max(complexities) if complexities else None,
+                "complex_functions": complex_functions[:20],
             }
             self._finish_ok()
         except Exception as exc:  # pragma: no cover

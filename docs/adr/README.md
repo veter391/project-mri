@@ -10,6 +10,7 @@ decision, and what it costs — including decisions that were later superseded.
 | [003](ADR-003-product-shape-local-first.md) | Local-first, self-hosted product shape | Accepted |
 | [004](ADR-004-repo-structure-workflow-stack.md) | Repo structure, workflow, and web stack | Accepted, amended |
 | [005](ADR-005-schema-migrations.md) | Schema migrations for the local SQLite database | Accepted |
+| [006](ADR-006-oss-adoption.md) | Which libraries we adopt, and which we do not | Accepted |
 
 ## Conventions
 

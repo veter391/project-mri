@@ -191,7 +191,7 @@ mri scan PATH_OR_URL
 | **git_history** | Commit hotspots, bus factor, knowledge islands, change frequency |
 | **architecture** | Module map, god modules, deep nesting, layer violations |
 | **dependencies** | Import graph, SCC cycle detection, fan-in/fan-out, unstable modules |
-| **complexity** | LOC, function length, cyclomatic, comment ratio, long files |
+| **complexity** | LOC, function length, cyclomatic complexity (lizard), comment ratio, long files |
 | **tech_debt** | TODO/FIXME/HACK markers, dead code, density per file |
 | **coupling** | Robert Martin's I/A/D metrics, afferent/efferent coupling |
 

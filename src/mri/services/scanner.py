@@ -65,6 +65,13 @@ EXCLUDE_DIRS = {
     "__pycache__", "dist", "build", "target", ".next", ".nuxt", ".cache",
     ".idea", ".vscode", ".pytest_cache", ".mypy_cache", ".ruff_cache",
     "coverage", ".coverage", ".gradle",
+    # `.next` is the Next.js *working* directory, but a static export writes its
+    # bundles to `_next` — a different name that was not excluded. Scanning this
+    # repository pulled in 40 minified chunks and analysed them as source, which
+    # skewed complexity, dependencies and debt for anyone with an exported
+    # frontend in their tree. `out` is the default export directory beside it.
+    "_next", "out", ".output", ".svelte-kit", ".turbo", ".parcel-cache",
+    "site-packages", ".tox", ".nox", ".eggs", "htmlcov",
 }
 
 # Top-level filename patterns that we count as project files
