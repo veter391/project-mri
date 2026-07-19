@@ -1,7 +1,6 @@
 """`mri` CLI — subcommands: init, scan, serve, watch, demo, backup, restore, upgrade, reset, ui."""
 from __future__ import annotations
 
-import asyncio
 import getpass
 import shutil
 import sys
@@ -9,11 +8,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import click
-import uvicorn
 
-from mri.services.demo_feed import generate_demo_report
-from mri.services.report_generator import render_html, render_json, write_report_files
-from mri.services.scanner import Scanner, ScanOptions
+# Everything heavy is imported inside the command that needs it. Importing the
+# scanner, uvicorn, GitPython and the demo feed at module scope cost 650 ms on
+# every invocation — including `--help`, `--version`, shell completion and every
+# error path — against a 49 ms floor for click alone. A CLI that takes half a
+# second to print usage is a CLI that feels broken.
 
 
 @click.group()
@@ -141,6 +141,11 @@ def init(username: str | None, password: str | None, config_path: str | None, ye
 @click.option("--quiet", "-q", is_flag=True, help="Suppress progress output")
 def scan(project_path: str, branch: str | None, output: str, json_out: str | None, depth: int | None, quiet: bool) -> None:
     """Scan a project (local path or git URL) and produce an HTML report."""
+    import asyncio
+
+    from mri.services.report_generator import render_json, write_report_files
+    from mri.services.scanner import Scanner, ScanOptions
+
     click.echo(f"→ scanning {project_path}", err=True)
 
     async def go() -> None:
@@ -188,6 +193,11 @@ def scan(project_path: str, branch: str | None, output: str, json_out: str | Non
 @click.option("--quiet", "-q", is_flag=True, help="Suppress per-scan output")
 def watch(project_path: str, branch: str | None, output_dir: str, depth: int | None, debounce: float, quiet: bool) -> None:
     """Watch a directory and re-scan whenever files change."""
+    import asyncio
+
+    from mri.services.report_generator import render_html, render_json
+    from mri.services.scanner import Scanner, ScanOptions
+
     click.echo(f"→ watching {project_path} (Ctrl+C to stop)", err=True)
     output_path = Path(output_dir).expanduser().resolve()
     output_path.mkdir(parents=True, exist_ok=True)
@@ -254,6 +264,8 @@ def serve(host: str | None, port: int | None, reload: bool) -> None:
         assert_safe_bind(host)
     except RuntimeError as exc:
         raise SystemExit(f"error: {exc}") from exc
+    import uvicorn
+
     click.echo(f"→ starting project-mri at http://{host}:{port}", err=True)
     click.echo(f"  API:        http://{host}:{port}/api/docs", err=True)
     click.echo(f"  Dashboard:  http://{host}:{port}/dashboard/", err=True)
@@ -270,6 +282,9 @@ def serve(host: str | None, port: int | None, reload: bool) -> None:
 @click.option("--output", "-o", default="./mri-demo-report.html", help="Output path (HTML)")
 def demo(slug: str, output: str) -> None:
     """Generate a demo report without scanning a real project."""
+    from mri.services.demo_feed import generate_demo_report
+    from mri.services.report_generator import render_html
+
     click.echo(f"→ generating demo report for '{slug}'", err=True)
     report = generate_demo_report(slug)
     report.scan_uuid = "demo-" + slug
