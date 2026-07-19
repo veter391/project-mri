@@ -14,7 +14,12 @@ from __future__ import annotations
 from pathlib import Path
 
 from mri.analyzers.base import ScanContext
-from mri.analyzers.parsing import extract_imports, get_parser_for, walk_imports
+from mri.analyzers.parsing import (
+    extract_imports,
+    get_parser_for,
+    resolve_python_import,
+    walk_imports,
+)
 
 
 def _ctx(tmp_path: Path) -> ScanContext:
@@ -156,3 +161,42 @@ def test_package_import_resolves_to_its_init(tmp_path: Path):
     })
     resolved = extract_imports(ctx, "pkg/user.py", ctx.read_text("pkg/user.py"))
     assert "pkg/sub/__init__.py" in resolved or "pkg/__init__.py" in resolved
+
+
+def test_resolution_can_only_ever_name_a_walked_file(tmp_path: Path):
+    """The safety property, stated as an invariant rather than a list of cases.
+
+    Import specifiers come from untrusted repository content. Resolution returns
+    a candidate only if it is already a member of the walked file set, so no
+    specifier — however malformed — can name a path outside the project. These
+    inputs are the ones worth naming explicitly, but the guarantee is structural,
+    not a blocklist."""
+    ctx = _package(tmp_path, {"pkg/__init__.py": "", "pkg/a.py": ""})
+    hostile = [
+        "." * 20 + "escape",          # more dots than the tree is deep
+        "." * 5000 + "x",             # pathological depth
+        "../../../../etc/passwd",
+        "pkg/../../../etc/passwd",
+        "\x00evil",
+        "a" * 100_000,
+        "",
+        ".",
+    ]
+    for specifier in hostile:
+        resolved = resolve_python_import(ctx, "pkg/a.py", specifier)
+        assert resolved is None or resolved in ctx.known_files(), (
+            f"{specifier[:40]!r} resolved to {resolved!r}, which is not a walked file"
+        )
+
+
+def test_resolution_stays_cheap_on_pathological_specifiers(tmp_path: Path):
+    """It runs per import per file, so a hostile repository must not be able to
+    make it expensive."""
+    import time
+
+    ctx = _package(tmp_path, {"pkg/__init__.py": "", "pkg/a.py": ""})
+    start = time.perf_counter()
+    for _ in range(100):
+        resolve_python_import(ctx, "pkg/a.py", "." * 5000 + "x")
+    elapsed = time.perf_counter() - start
+    assert elapsed < 2.0, f"100 pathological resolutions took {elapsed:.2f}s"
