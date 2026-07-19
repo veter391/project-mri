@@ -144,3 +144,67 @@ async def test_empty_inputs_are_handled(db: Path):
     async with get_connection(db) as conn:
         assert await authorship_evidence_for(conn, []) == {}
         assert await weight_hotspots(conn, {}) == []
+
+
+# ---------------------------------------------------------------------------
+# What the block-6 audits found
+# ---------------------------------------------------------------------------
+
+
+async def test_a_deleted_file_is_authorship_evidence_not_silence(db: Path):
+    """An agent deleting a file is the strongest authorship signal, not the
+    absence of one. Dropping it made a deleted file read like an untouched one."""
+    async with get_connection(db) as conn:
+        sid = await _session(conn, "s1")
+        await _touch(conn, sid, "src/gone.py", "delete", 0.9)
+        evidence = await authorship_evidence_for(conn, ["src/gone.py"])
+    ev = evidence["src/gone.py"]
+    assert ev.ai_delete_touches == 1
+    assert ev.evidence_strength == 0.9, "a delete carries modification strength"
+    assert ev.has_write_evidence, "a deleted file is not 'no evidence'"
+
+
+async def test_read_only_sessions_do_not_count_as_authors(db: Path):
+    """distinct_ai_sessions is about who modified the file. A session that only
+    read it is not an author of it."""
+    async with get_connection(db) as conn:
+        writer = await _session(conn, "writer")
+        reader = await _session(conn, "reader")
+        await _touch(conn, writer, "src/a.py", "write", 0.9)
+        await _touch(conn, reader, "src/a.py", "read", 0.9)
+        evidence = await authorship_evidence_for(conn, ["src/a.py"])
+    ev = evidence["src/a.py"]
+    assert ev.distinct_ai_sessions == 1, "only the writing session counts as an author"
+    assert ev.ai_read_touches == 1, "the read is still recorded, just not as authorship"
+
+
+async def test_more_paths_than_the_sql_variable_limit(db: Path):
+    """SQLite caps a statement at 32,766 bound variables. A large monorepo
+    reaches that with no adversarial input; the query is chunked so it does
+    not crash."""
+    async with get_connection(db) as conn:
+        sid = await _session(conn, "s1")
+        await _touch(conn, sid, "src/real.py", "write", 0.9)
+        paths = [f"src/f{i}.py" for i in range(40_000)] + ["src/real.py"]
+        evidence = await authorship_evidence_for(conn, paths)
+    assert set(evidence) == {"src/real.py"}, "chunking must not lose or duplicate the one real row"
+    assert evidence["src/real.py"].ai_write_touches == 1
+
+
+async def test_negative_base_risk_is_refused(db: Path):
+    """A negative risk is a caller bug and silently breaks the weighting
+    invariant (round(-50 * 0.0, 2) == -0.0, which exceeds -50). It fails loudly."""
+    async with get_connection(db) as conn:
+        with pytest.raises(ValueError, match="non-negative"):
+            await weight_hotspots(conn, {"src/a.py": -50.0})
+
+
+async def test_a_delete_makes_a_hotspot_weight_nonzero(db: Path):
+    """The bias-toward-involvement guard cuts both ways: an agent-deleted path
+    that is somehow still scored must carry its evidence, not read as zero."""
+    async with get_connection(db) as conn:
+        sid = await _session(conn, "s1")
+        await _touch(conn, sid, "src/gone.py", "delete", 0.8)
+        weighted = await weight_hotspots(conn, {"src/gone.py": 50.0})
+    assert weighted[0].weighted_risk == 40.0
+    assert weighted[0].evidence.ai_delete_touches == 1
