@@ -1,93 +1,102 @@
-# Project MRI — Full Production Roadmap
+# Project MRI — Roadmap
 
-**Goal:** 100% production-ready, self-hosted, open-source codebase intelligence tool.
-**Status:** In progress (Phase 0 → Phase 7)
-**Last updated:** 2025-12-20
+**Goal:** a production-ready, self-hosted, MIT-licensed codebase intelligence
+tool — not a demo and not an MVP.
 
-## Two artifacts
+**Last verified against the code:** 2026-07-19. Every box below was checked by
+running the thing or reading the file that implements it, not from memory. If
+you find a claim here that the code does not support, that is a bug in this
+document and worth an issue.
 
-This repository ships **two distinct things**:
+## What this repository ships
 
-### 1. Public marketing site (root of repo)
-- Lives at `/workspace/project-mri/*.html` and `/workspace/project-mri/css/`, etc.
-- Deployed to `dhik11xvyp9l.space.minimax.io` (separate static deployment).
-- Shows: features, manifesto, install instructions, architecture diagram, demo.
-- Audience: people discovering the product.
+Two artifacts, deliberately separate:
 
-### 2. Self-hosted product (the actual deliverable)
-- Lives in `/workspace/project-mri/backend/` (API + CLI) and `/workspace/project-mri/dashboard/` (UI).
-- Installed by end users via `pip install project-mri` or `docker run projectmri/mri`.
-- Includes its own web UI at `http://localhost:7331/dashboard/`.
-- Audience: people who installed it on their own server.
+| | Source | Audience |
+|---|---|---|
+| **Public site** | [`apps/web/`](../apps/web) | People discovering the product |
+| **The product** | [`src/mri/`](../src/mri) (API + CLI), [`apps/dashboard/`](../apps/dashboard) (UI) | People who installed it |
 
-The marketing site and the dashboard share the same **design language** (warm amber, JetBrains Mono,
-terminal aesthetic) but are **completely separate** — the marketing site is read-only docs/info,
-the dashboard is a fully interactive tool.
+They share a design language and nothing else. The site is read-only; the
+dashboard is the installed tool's own interface, served by the API at
+`/dashboard/`.
 
-## Phases
+---
 
-### Phase 0: Restructure (in progress)
-- [x] Add `dashboard/` directory for the self-hosted UI source
-- [x] Keep `*.html` and `css/` at repo root (the marketing site)
-- [x] Document the separation
+## Shipped
 
-### Phase 1: Backend foundations
-- [ ] `.mri.yml` config file loader (`mri/config.py`)
-- [ ] Single-user auth (set during `mri init`) — username + password + JWT
-- [ ] Alembic migrations
-- [ ] WebSocket auth
-- [ ] Persistent scan queue (in DB) so scans survive server restart
+**Engine and CLI**
+- [x] Git-history and structure analyzers, with explainable per-analyzer scoring
+- [x] `mri init`, `scan`, `serve`, `watch`, `demo`, `backup`, `restore`, `upgrade`, `reset`, `ui`
+- [x] Scanning a remote URL — clone, then scan; GitHub and GitLab tokens; shallow clone
+- [x] Self-contained HTML reports
+- [x] SARIF export for CI
+- [x] Webhook notifications, with delivery recorded in the database
+- [x] `GET /api/scans/{a}/diff/{b}` — compare two scans
+- [x] Live scan progress over WebSocket
 
-### Phase 2: Repository cloning
-- [ ] `mri scan <url>` — clone remote repo, then scan
-- [ ] GitHub PAT support for private repos
-- [ ] GitLab PAT support
-- [ ] Shallow clone (`--depth=N`)
-- [ ] Auto-cleanup of cloned repos
+**Foundations**
+- [x] `.mri.yml` configuration ([CONFIG.md](CONFIG.md))
+- [x] Single-user auth set during `mri init` — password hashing, JWT
+- [x] Schema migrations — a small in-house runner, not Alembic
+      ([ADR-005](adr/ADR-005-schema-migrations.md) explains why)
+- [x] Reproducible toolchain: `uv.lock` plus a hash-pinned `requirements.txt`
+- [x] Deterministic container image, verified by an actual `docker run`
+- [x] CI: lint, types, tests, dashboard e2e with axe accessibility checks
 
-### Phase 3: Operational features
-- [ ] `GET /api/scans/{a}/diff/{b}` — compare two scans
-- [ ] SARIF export for CI integration
-- [ ] Webhook notifications on scan_complete / scan_failed
-- [ ] `mri watch <path>` — re-scan on file change
-- [ ] DB backup / restore commands (`mri backup`, `mri restore`)
+**The fusion data model** — the tables the remaining layers are built on:
+sessions, session events, file touches, authorship shares, decisions,
+consequences. Two product claims are enforced by the schema rather than by
+convention: an attribution's shares must account for the whole file with
+`unattributed` as a first-class share, and a consequence must declare whether
+it claims correlation or causation.
 
-### Phase 4: Self-hosted dashboard
-- [ ] Login page (JWT)
-- [ ] Projects list (with status badges, last scan, score)
-- [ ] Project detail (list of scans, ability to trigger new scan)
-- [ ] Scan detail (real-time progress via WebSocket, results, findings)
-- [ ] Diff view (compare 2 scans side-by-side)
-- [ ] Settings (admin: change password, integrations, webhooks)
-- [ ] Same design language as marketing site
+**Documentation**
+- [x] [INSTALL.md](INSTALL.md), [CONFIG.md](CONFIG.md), [API.md](API.md),
+      [INTEGRATIONS.md](INTEGRATIONS.md), [DASHBOARD.md](DASHBOARD.md)
+- [x] [Architecture decision records](adr/README.md), including the ones that
+      declined a dependency and said why
 
-### Phase 5: Distribution
-- [ ] `pyproject.toml` ready for `pip install project-mri`
-- [ ] `install.sh` one-liner: `curl -fsSL ... | bash`
-- [ ] `mri init` — first-run setup (admin user, DB, default config)
-- [ ] `mri upgrade` — pull latest and run migrations
-- [ ] `mri reset` — wipe DB (with confirmation)
-- [ ] Dockerfile + docker-compose ready for Docker Hub
-- [ ] GitHub Action: `uses: project-mri/action@v1`
-- [ ] GitLab CI template
-- [ ] Homebrew formula (optional)
+---
 
-### Phase 6: Tests
-- [ ] New tests for all features (config, auth, clone, diff, SARIF, webhook, watch)
-- [ ] Dashboard E2E tests with Playwright
-- [ ] All 85+ existing tests still pass
+## In progress
 
-### Phase 7: Documentation
-- [ ] `INSTALL.md` — full install guide
-- [ ] `DASHBOARD.md` — dashboard user guide
-- [ ] `API.md` — auto-generated API reference
-- [ ] `INTEGRATIONS.md` — GitHub, GitLab, webhooks
-- [ ] `CONFIG.md` — `.mri.yml` reference
-- [ ] Updated `README.md` with new install instructions
-- [ ] Updated `CHANGELOG.md` with v0.3.0 entry
+**AI-authorship attribution.** Reading local agent session logs to decompose
+per-file risk into AI-authored, human-authored, and — honestly labelled —
+unattributed shares. The data model is in place; the ingest is not yet.
 
-### Final
-- [ ] Re-deploy marketing site
-- [ ] Package final v0.3.0 zip
-- [ ] Full E2E verification
-- [ ] Honest final report
+---
+
+## Planned
+
+- **Decision provenance.** Link commits, ADRs, and issues into a queryable
+  why-graph, with the "why" left absent when it cannot be recovered rather
+  than invented.
+- **The consequence loop.** Measure what actually changed after a decision, and
+  report it as correlation unless causation can be justified.
+- **Agent-native surface (MCP).** Let coding agents query risk, history, and
+  decisions live.
+- **Evaluation harness.** A labelled corpus and metrics, so the accuracy claims
+  in this README are numbers rather than adjectives.
+
+---
+
+## Not built yet
+
+Named explicitly so the absence is not mistaken for an oversight:
+
+- The dashboard is currently a login shell. The projects list, scan detail,
+  diff view, and settings screens are designed but not implemented.
+- No persistent scan queue — scans do not survive a server restart.
+- No `install.sh` one-liner, `docker-compose.yml`, GitHub Action, GitLab CI
+  template, or Homebrew formula. The supported installs today are
+  `pip install project-mri` and the container image.
+
+## Definition of done, for any item above
+
+1. Type checks and lint pass.
+2. The change was exercised — a test, a dev server, or both. "It reads
+   correctly" is not evidence.
+3. A security and a performance pass over the change, with findings either
+   fixed or declined in writing with a measurement.
+4. No accuracy claim ships without the number behind it.
