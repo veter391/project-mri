@@ -19,6 +19,10 @@ from mri.fusion.decisions import (
     _commit_decision,
 )
 
+#: Resolved once at import (sync), so the async regression test can gate on it
+#: without a blocking filesystem call inside the event loop.
+_REPO_ADR_DIR_EXISTS = Path("docs/adr").is_dir()
+
 
 @pytest.fixture
 def db(tmp_path: Path) -> Path:
@@ -168,3 +172,164 @@ async def test_ingest_commits_is_idempotent(db: Path):
             "SELECT rationale FROM decisions WHERE source = 'commit' AND source_ref = 'sha2'"
         )
         assert (await cursor.fetchone())[0] is None, "the bodyless commit kept a null rationale"
+
+
+# ---------------------------------------------------------------------------
+# What the block-7 audits found
+# ---------------------------------------------------------------------------
+
+
+def test_a_title_only_adr_has_no_invented_rationale():
+    """The honesty rule applies to ADRs as much as commits: a title with no body
+    is a what without a why, and the why stays None rather than an empty string
+    dressed up at 0.95 confidence."""
+    parsed = parse_adr("# ADR-000 Title only\n")
+    assert parsed is not None
+    assert parsed.rationale is None
+
+
+def test_the_decision_date_comes_from_the_header_not_the_body():
+    """An unscoped date search scavenged a date from a body subsection heading
+    and presented it as the decision date. The date is read only from the
+    metadata header before the first section."""
+    text = (
+        "# ADR-042 — Something\n\n"
+        "- **Status:** Accepted\n\n"
+        "## Context\nA rewrite happened on 2019-01-01 which we are undoing.\n"
+    )
+    parsed = parse_adr(text)
+    assert parsed is not None
+    assert parsed.decided_at is None, "no date in the header means no date, not one from the body"
+
+
+def test_a_header_date_is_still_read():
+    parsed = parse_adr("# ADR-1 — X\n\n- **Status:** Accepted · 2026-03-14\n\n## Decision\nDo it.\n")
+    assert parsed is not None
+    assert parsed.decided_at is not None
+    assert parsed.decided_at.year == 2026
+
+
+def test_status_is_parsed_across_its_real_forms_and_stored():
+    """The status was parsed but had nowhere to go, so the "a supersession is
+    picked up" claim was not true. It is now stored, and the parser handles the
+    forms this repo's own ADRs actually use."""
+    for text, expected in [
+        ("# A\n\n- **Status:** Accepted\n", "Accepted"),
+        ("# A\n\n> Status: **superseded**.\n", "superseded"),
+        ("# A\n\n**Status:** Accepted · 2026-01-01\n", "Accepted"),
+    ]:
+        assert parse_adr(text).status == expected, text
+
+
+async def test_status_is_persisted(db: Path, tmp_path: Path):
+    from mri.fusion import ingest_adrs
+
+    adr_dir = tmp_path / "adr"
+    adr_dir.mkdir()
+    (adr_dir / "ADR-001.md").write_text(
+        "# ADR-001 — X\n\n- **Status:** Superseded\n\n## Decision\nOld.\n", encoding="utf-8"
+    )
+    async with get_connection(db) as conn:
+        await ingest_adrs(conn, adr_dir)
+        cur = await conn.execute("SELECT status FROM decisions WHERE source='adr'")
+        assert (await cur.fetchone())[0] == "Superseded"
+
+
+async def test_an_adr_refresh_that_fails_partway_keeps_the_previous_set(db: Path, tmp_path: Path):
+    """A crafted ADR that trips an error mid-refresh must not wipe the provenance
+    already recorded. Delete and re-insert share one transaction."""
+    from unittest.mock import patch
+
+    from mri.fusion import ingest_adrs
+
+    adr_dir = tmp_path / "adr"
+    adr_dir.mkdir()
+    for i in range(3):
+        (adr_dir / f"ADR-{i:03d}.md").write_text(
+            f"# ADR-{i} — X\n\n## Decision\nDo {i}.\n", encoding="utf-8"
+        )
+    async with get_connection(db) as conn:
+        assert await ingest_adrs(conn, adr_dir) == 3
+
+        async def boom(*_a, **_k):
+            raise RuntimeError("simulated crash mid-refresh")
+
+        with patch.object(conn, "executemany", boom):
+            with pytest.raises(RuntimeError, match="simulated crash"):
+                await ingest_adrs(conn, adr_dir)
+
+        cur = await conn.execute("SELECT count(*) FROM decisions WHERE source='adr'")
+        assert (await cur.fetchone())[0] == 3, "the previous ADR set must survive a failed refresh"
+
+
+async def test_a_duplicate_commit_cannot_be_double_inserted_by_a_race(db: Path):
+    """The natural-key unique index makes the duplicate impossible at the
+    database, so two ingests both believing a commit is new cannot both store
+    it."""
+    from datetime import datetime, timezone
+
+    from mri.db import fusion_repository as frepo
+    from mri.models.fusion import Decision
+
+    d = Decision(
+        summary="feat: x", source="commit", source_ref="deadbeef",
+        commit_sha="deadbeef" * 5, decided_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        confidence=0.6,
+    )
+    async with get_connection(db) as conn:
+        # Both runs prepared the same commit; only one row results.
+        n1 = await frepo.insert_decisions_ignoring_duplicates(conn, [d])
+        n2 = await frepo.insert_decisions_ignoring_duplicates(conn, [d])
+        assert (n1, n2) == (1, 0)
+        cur = await conn.execute("SELECT count(*) FROM decisions WHERE source_ref='deadbeef'")
+        assert (await cur.fetchone())[0] == 1
+
+
+def test_a_symlinked_adr_is_skipped(tmp_path: Path):
+    """The ADR directory belongs to a possibly-untrusted repo. A symlink there
+    could point at a secret elsewhere on the host, so symlinks are not followed."""
+    from mri.fusion.decisions import _read_and_parse_adrs
+
+    adr_dir = tmp_path / "adr"
+    adr_dir.mkdir()
+    (adr_dir / "ADR-001.md").write_text("# ADR-001 — Real\n\n## Decision\nOK.\n", encoding="utf-8")
+    secret = tmp_path / "secret.md"
+    secret.write_text("# Leaked — secret\n\nAWS_KEY=AKIAFAKE\n", encoding="utf-8")
+    try:
+        (adr_dir / "ADR-evil.md").symlink_to(secret)
+    except OSError:
+        pytest.skip("cannot create symlinks on this host without privilege")
+
+    parsed = _read_and_parse_adrs(adr_dir)
+    summaries = [p.summary for _, p in parsed]
+    assert "ADR-001 — Real" in summaries
+    assert all("Leaked" not in s for s in summaries), "a symlinked ADR must not be followed"
+
+
+def test_an_oversized_adr_is_skipped(tmp_path: Path):
+    from mri.fusion.decisions import MAX_ADR_BYTES, _read_and_parse_adrs
+
+    adr_dir = tmp_path / "adr"
+    adr_dir.mkdir()
+    (adr_dir / "ADR-big.md").write_text("# Big\n\n" + "x" * (MAX_ADR_BYTES + 10), encoding="utf-8")
+    (adr_dir / "ADR-ok.md").write_text("# ADR-ok — Fine\n\n## Decision\nOK.\n", encoding="utf-8")
+    parsed = _read_and_parse_adrs(adr_dir)
+    assert [p.summary for _, p in parsed] == ["ADR-ok — Fine"]
+
+
+async def test_ingest_the_real_repo_adrs(db: Path):
+    """A regression test against this repo's own ADRs — the manual "verified on
+    this repo" check that missed the header-date and title-only bugs is now
+    automated."""
+    from mri.fusion import ingest_adrs
+
+    if not _REPO_ADR_DIR_EXISTS:
+        pytest.skip("run from the repo root")
+    adr_dir = Path("docs/adr")
+    async with get_connection(db) as conn:
+        count = await ingest_adrs(conn, adr_dir)
+        assert count >= 8, "every real ADR should be recorded"
+        # None of them should have scavenged a body date or an empty rationale.
+        cur = await conn.execute("SELECT source_ref, rationale FROM decisions WHERE source='adr'")
+        for ref, rationale in await cur.fetchall():
+            assert rationale, f"{ref} lost its rationale"

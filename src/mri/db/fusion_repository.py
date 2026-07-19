@@ -40,8 +40,10 @@ __all__ = [
     "insert_authorship_share",
     "insert_consequence",
     "insert_decision",
+    "insert_decisions_ignoring_duplicates",
     "insert_session_event",
     "insert_session_file_touch",
+    "replace_decisions_of_source",
     "touches_for_file",
     "upsert_session",
 ]
@@ -335,28 +337,87 @@ async def authorship_for_file(
     return [AuthorshipShare(**dict(r)) for r in await cursor.fetchall()]
 
 
-async def insert_decision(conn: aiosqlite.Connection, decision: Decision) -> Decision:
-    cursor = await conn.execute(
-        """
-        INSERT INTO decisions
-            (summary, rationale, source, source_ref, session_id, file_path,
-             commit_sha, decided_at, confidence)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            decision.summary,
-            decision.rationale,
-            decision.source,
-            decision.source_ref,
-            decision.session_id,
-            decision.file_path,
-            decision.commit_sha,
-            _iso(decision.decided_at),
-            decision.confidence,
-        ),
+_DECISION_COLUMNS = (
+    "summary, rationale, source, source_ref, session_id, file_path, "
+    "commit_sha, decided_at, status, confidence"
+)
+# Built once from a module constant of literal column names — no value is ever
+# interpolated, so the S608 warning is a false positive here. Concentrated to
+# these two lines rather than repeated at each call site.
+_INSERT_DECISION_SQL = (
+    f"INSERT INTO decisions ({_DECISION_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"  # noqa: S608
+)
+_INSERT_OR_IGNORE_DECISION_SQL = (
+    f"INSERT OR IGNORE INTO decisions ({_DECISION_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"  # noqa: S608, E501
+)
+
+
+def _decision_row(decision: Decision) -> tuple[Any, ...]:
+    return (
+        decision.summary,
+        decision.rationale,
+        decision.source,
+        decision.source_ref,
+        decision.session_id,
+        decision.file_path,
+        decision.commit_sha,
+        _iso(decision.decided_at),
+        decision.status,
+        decision.confidence,
     )
+
+
+async def insert_decision(conn: aiosqlite.Connection, decision: Decision) -> Decision:
+    cursor = await conn.execute(_INSERT_DECISION_SQL, _decision_row(decision))
     await conn.commit()
     return decision.model_copy(update={"id": int(cursor.lastrowid or 0)})
+
+
+async def replace_decisions_of_source(
+    conn: aiosqlite.Connection, source: str, decisions: list[Decision]
+) -> int:
+    """Atomically swap all decisions of one source for a new set.
+
+    The old delete-then-insert-in-a-loop left the table empty for any reader
+    that looked mid-refresh, and lost everything if an insert failed partway —
+    an audit reproduced a crafted ADR wiping the provenance it was meant to
+    record. Delete and re-insert now share one transaction: it either replaces
+    the set whole or leaves the previous set untouched.
+    """
+    try:
+        await conn.execute("BEGIN")
+        await conn.execute("DELETE FROM decisions WHERE source = ?", (source,))
+        await conn.executemany(_INSERT_DECISION_SQL, [_decision_row(d) for d in decisions])
+        await conn.commit()
+    except Exception:
+        await conn.rollback()
+        raise
+    return len(decisions)
+
+
+async def insert_decisions_ignoring_duplicates(
+    conn: aiosqlite.Connection, decisions: list[Decision]
+) -> int:
+    """Insert decisions, skipping any whose (source, source_ref) already exists.
+
+    One transaction, and the skip is the database's job via the natural-key
+    unique index (migration 0005), not a read-then-write check — so two ingests
+    racing cannot both decide a commit is new and both insert it.
+    """
+    if not decisions:
+        return 0
+    before = (await (await conn.execute("SELECT count(*) FROM decisions")).fetchone())[0]
+    try:
+        await conn.execute("BEGIN")
+        await conn.executemany(
+            _INSERT_OR_IGNORE_DECISION_SQL, [_decision_row(d) for d in decisions]
+        )
+        await conn.commit()
+    except Exception:
+        await conn.rollback()
+        raise
+    after = (await (await conn.execute("SELECT count(*) FROM decisions")).fetchone())[0]
+    return int(after - before)
 
 
 async def decisions_for_file(
