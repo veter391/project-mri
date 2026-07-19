@@ -99,7 +99,8 @@ def test_upgrading_a_pre_fusion_database_keeps_its_data(tmp_path: Path):
         conn.close()
 
     applied = migrate(db)
-    assert applied == ["0002_fusion_model.sql"], "the baseline should be stamped, not re-run"
+    assert "0001_initial_schema.sql" not in applied, "the baseline should be stamped, not re-run"
+    assert "0002_fusion_model.sql" in applied
 
     conn = sqlite3.connect(db)
     try:
@@ -283,3 +284,136 @@ async def test_round_trip_preserves_every_guarantee(db: Path):
         assert found[0].confounders == ["a refactor landed in the same window"], (
             "confounders must survive storage — they are the caveat on the claim"
         )
+
+
+# ---------------------------------------------------------------------------
+# Content retention (migration 0003)
+# ---------------------------------------------------------------------------
+
+
+async def test_retention_off_refuses_content(db: Path):
+    """`content_stored` was decorative when 0002 shipped: a session could claim
+    it kept no content while holding a pasted API key. The schema now refuses."""
+    async with get_connection(db) as conn:
+        session = await repo.upsert_session(
+            conn, Session(source="claude_code", external_id="off", content_stored=False)
+        )
+        assert session.id is not None
+        with pytest.raises(sqlite3.IntegrityError, match="content_stored"):
+            await repo.insert_session_event(
+                conn,
+                SessionEvent(session_id=session.id, seq=1, role="user", content="sk-SECRET"),
+            )
+
+        # Metadata-only ingest is the supported path and still works.
+        await repo.insert_session_event(
+            conn,
+            SessionEvent(session_id=session.id, seq=2, role="user", content=None, content_hash="h"),
+        )
+        assert len(await repo.events_for_session(conn, session.id)) == 1
+
+
+async def test_retention_on_still_allows_contentless_turns(db: Path):
+    """The inverse is deliberately not enforced — tool and system turns carry no
+    content, and forcing an empty string there would be its own small lie."""
+    async with get_connection(db) as conn:
+        session = await repo.upsert_session(
+            conn, Session(source="claude_code", external_id="on", content_stored=True)
+        )
+        assert session.id is not None
+        await repo.insert_session_event(
+            conn, SessionEvent(session_id=session.id, seq=1, role="user", content="hello")
+        )
+        await repo.insert_session_event(
+            conn,
+            SessionEvent(session_id=session.id, seq=2, role="tool", content=None, content_hash="h"),
+        )
+        assert len(await repo.events_for_session(conn, session.id)) == 2
+
+
+def test_turning_retention_off_redacts_what_was_kept(db: Path):
+    """Switching the flag off is a request to stop retaining, not to relabel.
+    The content goes; the hashes stay, so turns remain correlatable."""
+    conn = sqlite3.connect(db)
+    try:
+        conn.execute("INSERT INTO sessions (source, external_id, content_stored) VALUES ('cc','s',1)")
+        conn.execute(
+            "INSERT INTO session_events (session_id, seq, role, content, content_hash)"
+            " VALUES (1, 1, 'user', 'sk-SECRET', 'h1')"
+        )
+        conn.commit()
+        conn.execute("UPDATE sessions SET content_stored = 0 WHERE id = 1")
+        conn.commit()
+        content, content_hash = conn.execute(
+            "SELECT content, content_hash FROM session_events"
+        ).fetchone()
+    finally:
+        conn.close()
+    assert content is None, "flipping retention off must drop the retained content"
+    assert content_hash == "h1", "the hash must survive so turns stay correlatable"
+
+
+def test_the_rule_holds_for_a_connection_that_bypasses_this_package(db: Path):
+    """Enforced by the schema rather than by the repository, so a backfill or a
+    fixup script cannot route around it."""
+    conn = sqlite3.connect(db)
+    try:
+        conn.execute("INSERT INTO sessions (source, external_id, content_stored) VALUES ('cc','s',0)")
+        conn.commit()
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO session_events (session_id, seq, role, content)"
+                " VALUES (1, 1, 'user', 'sk-SECRET')"
+            )
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Reads survive damaged rows and hostile limits
+# ---------------------------------------------------------------------------
+
+
+async def test_one_damaged_row_does_not_take_down_the_read(db: Path):
+    """A row written outside the models must not make every sibling
+    unreadable — and the damage must be visible rather than smoothed over."""
+    conn = sqlite3.connect(db)
+    try:
+        conn.execute("INSERT INTO decisions (summary, source) VALUES ('d', 'commit')")
+        for metric, confounders in (("good", '["a real caveat"]'), ("bad", "not-json")):
+            conn.execute(
+                "INSERT INTO consequences (decision_id, metric, window_start, window_end,"
+                " confounders) VALUES (1, ?, '2026-01-01', '2026-02-01', ?)",
+                (metric, confounders),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    async with get_connection(db) as conn:
+        found = {c.metric: c.confounders for c in await repo.consequences_for_decision(conn, 1)}
+    assert found["good"] == ["a real caveat"]
+    assert found["bad"] == [repo.UNREADABLE_CONFOUNDERS], (
+        "a damaged caveat must report itself as damaged, not as an empty list — "
+        "an empty list is the claim that nothing was considered"
+    )
+
+
+async def test_limits_are_clamped_by_the_repository(db: Path):
+    """The ceiling lives here, not at the call site, because there will be more
+    than one call site and one of them will pass a request parameter straight
+    through."""
+    async with get_connection(db) as conn:
+        session = await repo.upsert_session(
+            conn, Session(source="cc", external_id="lim", content_stored=False)
+        )
+        assert session.id is not None
+        for seq in range(5):
+            await repo.insert_session_event(
+                conn, SessionEvent(session_id=session.id, seq=seq, role="user", content_hash="h")
+            )
+        assert len(await repo.events_for_session(conn, session.id, limit=10**9)) == 5
+
+    assert repo._limit(10**9) == repo.MAX_ROWS
+    assert repo._limit(0) == 1
+    assert repo._limit(50) == 50

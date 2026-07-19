@@ -14,6 +14,7 @@ on the way in.
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 
 import aiosqlite
@@ -43,8 +44,46 @@ __all__ = [
 ]
 
 
+logger = logging.getLogger(__name__)
+
+#: Ceiling on rows returned by any query here. The per-function defaults are the
+#: sensible page size; this is the backstop for a caller that passes its own
+#: `limit` straight through from a request. Clamping belongs here rather than at
+#: the call site, because there will be more than one call site.
+MAX_ROWS = 5_000
+
+#: Stored when `confounders` cannot be parsed. An empty list would read as "no
+#: alternative explanations were considered", which is a claim, and the wrong
+#: one — the caveat on the finding is damaged, not absent, and a reader has to
+#: be able to tell those apart.
+UNREADABLE_CONFOUNDERS = "<unreadable: the stored value was not valid JSON>"
+
+
+def _limit(value: int) -> int:
+    return max(1, min(value, MAX_ROWS))
+
+
 def _iso(value: Any) -> str | None:
     return value.isoformat() if hasattr(value, "isoformat") else value
+
+
+def _confounders(raw: Any, *, row_id: Any) -> list[str]:
+    """Decode the stored JSON, surviving a row that was written badly.
+
+    Every write here goes through a validated model, so this should be
+    unreachable. It exists because a backfill, a fixup script, or a future
+    importer could put something else in the column, and one damaged row must
+    not take down the whole read — the other consequences are still true.
+    """
+    try:
+        decoded = json.loads(raw or "[]")
+    except (TypeError, ValueError):
+        logger.warning("consequence %s has unreadable confounders; reporting it as damaged", row_id)
+        return [UNREADABLE_CONFOUNDERS]
+    if not isinstance(decoded, list):
+        logger.warning("consequence %s stored confounders as %s, not a list", row_id, type(decoded).__name__)
+        return [UNREADABLE_CONFOUNDERS]
+    return [str(item) for item in decoded]
 
 
 async def upsert_session(conn: aiosqlite.Connection, session: Session) -> Session:
@@ -119,7 +158,7 @@ async def events_for_session(
 ) -> list[SessionEvent]:
     cursor = await conn.execute(
         "SELECT * FROM session_events WHERE session_id = ? ORDER BY seq LIMIT ?",
-        (session_id, limit),
+        (session_id, _limit(limit)),
     )
     return [SessionEvent(**dict(r)) for r in await cursor.fetchall()]
 
@@ -152,7 +191,7 @@ async def touches_for_file(
 ) -> list[SessionFileTouch]:
     cursor = await conn.execute(
         "SELECT * FROM session_file_touches WHERE file_path = ? ORDER BY occurred_at DESC LIMIT ?",
-        (file_path, limit),
+        (file_path, _limit(limit)),
     )
     return [SessionFileTouch(**dict(r)) for r in await cursor.fetchall()]
 
@@ -187,7 +226,7 @@ async def authorship_for_file(
 ) -> list[AuthorshipShare]:
     cursor = await conn.execute(
         "SELECT * FROM authorship_shares WHERE file_path = ? ORDER BY computed_at DESC LIMIT ?",
-        (file_path, limit),
+        (file_path, _limit(limit)),
     )
     return [AuthorshipShare(**dict(r)) for r in await cursor.fetchall()]
 
@@ -221,7 +260,7 @@ async def decisions_for_file(
 ) -> list[Decision]:
     cursor = await conn.execute(
         "SELECT * FROM decisions WHERE file_path = ? ORDER BY decided_at DESC LIMIT ?",
-        (file_path, limit),
+        (file_path, _limit(limit)),
     )
     return [Decision(**dict(r)) for r in await cursor.fetchall()]
 
@@ -260,12 +299,12 @@ async def consequences_for_decision(
 ) -> list[Consequence]:
     cursor = await conn.execute(
         "SELECT * FROM consequences WHERE decision_id = ? ORDER BY window_end DESC LIMIT ?",
-        (decision_id, limit),
+        (decision_id, _limit(limit)),
     )
     out: list[Consequence] = []
     for row in await cursor.fetchall():
         data = dict(row)
         # Stored as JSON; the model works with the list.
-        data["confounders"] = json.loads(data.get("confounders") or "[]")
+        data["confounders"] = _confounders(data.get("confounders"), row_id=data.get("id"))
         out.append(Consequence(**data))
     return out
