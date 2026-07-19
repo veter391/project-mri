@@ -171,6 +171,14 @@ def scan(project_path: str, branch: str | None, output: str, json_out: str | Non
             files["html"].rename(out)
         if json_out:
             Path(json_out).write_text(render_json(report), encoding="utf-8")
+
+        # Record it, so `mri list` and the dashboard see CLI scans too. Without
+        # this the CLI wrote a file and nothing else, and the documented
+        # "scan then list" pairing could never work.
+        from mri.db.repository import persist_report
+
+        persist_report(report)
+
         click.echo(f"✓ report saved → {out}", err=True)
         click.echo(f"  overall health: {report.overall_health:.1f}/100 ({report.overall_band})", err=True)
         click.echo(f"  duration: {report.duration_ms} ms", err=True)

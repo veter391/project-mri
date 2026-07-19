@@ -188,3 +188,32 @@ def test_a_genuine_v030_database_is_still_stamped(db: Path):
 
     assert migrate(db) == []
     assert applied_migrations(db) == {BASELINE}
+
+
+def test_cli_scan_is_recorded_so_list_can_show_it(db: Path, tmp_path: Path):
+    """`mri scan` wrote an HTML file and nothing else, so `mri list` — which
+    docs/INSTALL.md tells users to run straight afterwards — was permanently
+    empty for anyone not using the HTTP API. Two commands documented as a pair
+    that could never work together."""
+    import asyncio
+
+    from mri.db.repository import persist_report
+    from mri.services.scanner import Scanner
+
+    project = tmp_path / "proj"
+    project.mkdir()
+    (project / "a.py").write_text("x = 1\n", encoding="utf-8")
+
+    report = asyncio.run(Scanner().scan(str(project)))
+    assert report.scan_uuid, "a scan with no identity cannot be recorded or linked"
+
+    persist_report(report, db)
+
+    conn = sqlite3.connect(db)
+    try:
+        rows = conn.execute("SELECT scan_uuid, status FROM scans").fetchall()
+    finally:
+        conn.close()
+    assert len(rows) == 1
+    assert rows[0][0] == report.scan_uuid
+    assert rows[0][1] == "completed"

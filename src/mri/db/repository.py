@@ -58,6 +58,66 @@ def connect_sync(db_path: Path | None = None) -> sqlite3.Connection:
     return conn
 
 
+def persist_report(report: Any, db_path: Path | None = None) -> str:
+    """Record a finished scan in the local database, synchronously.
+
+    The CLI had no path to the database at all: `mri scan` wrote an HTML file
+    and nothing else, so `mri list` — which docs/INSTALL.md tells users to run
+    right afterwards to "see recent scans" — was permanently empty for anyone
+    who did not use the HTTP API. Two commands documented as a pair that could
+    never work together.
+
+    Returns the scan UUID.
+    """
+    from mri.db.migrator import migrate
+
+    path = db_path or default_db_path()
+    migrate(path)
+    conn = connect_sync(path)
+    try:
+        now = utcnow()
+        conn.execute(
+            """
+            INSERT INTO projects (path, name, default_branch, first_scanned, last_scanned)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(path) DO UPDATE SET
+                name = excluded.name,
+                last_scanned = excluded.last_scanned
+            """,
+            (report.project.path, report.project.name, report.project.default_branch, now, now),
+        )
+        row = conn.execute(
+            "SELECT id FROM projects WHERE path = ?", (report.project.path,)
+        ).fetchone()
+        summary = {
+            "overall_health": report.overall_health,
+            "overall_band": report.overall_band,
+            "file_count": report.stats.get("file_count", 0),
+            "loc_total": report.stats.get("loc_total", 0),
+            "commit_count": report.stats.get("commit_count", 0),
+            "finding_counts": report.stats.get("finding_counts", {}),
+            "duration_ms": report.duration_ms,
+        }
+        conn.execute(
+            """
+            INSERT INTO scans
+                (project_id, scan_uuid, status, started_at, finished_at, report_json, summary_json)
+            VALUES (?, ?, 'completed', ?, ?, ?, ?)
+            """,
+            (
+                int(row["id"]),
+                report.scan_uuid,
+                report.started_at.isoformat() if report.started_at else now,
+                now,
+                json.dumps(report.model_dump(mode="json"), default=_json_default),
+                json.dumps(summary, default=_json_default),
+            ),
+        )
+        return str(report.scan_uuid)
+    finally:
+        conn.close()
+
+
 def default_db_path() -> Path:
     """Return the default SQLite cache path. Override with MRI_DB env var."""
     import os

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -409,7 +410,12 @@ class Scanner:
         duration_ms = int((finished - started).total_seconds() * 1000)
 
         return Report(
-            scan_uuid="",  # filled in by API layer after DB insert
+            # Every scan identifies itself. This used to be left empty with
+            # "filled in by API layer after DB insert", which meant a CLI scan
+            # had no identity at all — it could not be recorded, listed, or
+            # linked to its report. The API still overwrites it with the UUID it
+            # allocated for its own row.
+            scan_uuid=uuid.uuid4().hex,
             project=Project(
                 path=str(path),
                 name=path.name,
