@@ -119,16 +119,58 @@ Its real value is storage backends — Redis, Memcached — for rate limiting sh
 across processes. This tool is a single local process. Revisit if it ever runs
 as a multi-instance service.
 
-### Still open
+### Declined: grimp / import-linter — but the evaluation changed the code anyway
 
-grimp / import-linter is under evaluation; the question there is whether static
-Python import resolution is worth a second, Python-only code path in a
-multi-language extractor.
+grimp is healthy (3.15, July 2026, wheels for 3.10-3.14) and it does not need
+the analysed code to be importable, which was the objection I expected to
+disqualify it: it parses statically and only uses `find_spec` to locate the
+package directory. So the "we just cloned an untrusted repo with nothing
+installed" problem largely dissolves.
+
+It was declined on fit rather than quality:
+
+- It is Python-only, while the import graph is shared across six languages. It
+  yields a whole graph of dotted module names, not per-file import lists, so
+  keeping one comparable graph needs a translation layer back to repo-relative
+  paths.
+- It fails all-or-nothing per package, so the existing extractor stays as a
+  fallback regardless. That leaves three things to maintain — grimp, the
+  heuristic, and the arbitration between them — and the same repository can then
+  produce different metrics depending on which path fired. Non-determinism is
+  worse in a reporting tool than a consistent, known limitation.
+- It requires knowing the package roots and putting them on `sys.path`. For an
+  arbitrary repository that is the layout-detection problem we would be adopting
+  it to avoid, plus `sys.path` mutation pointing at freshly cloned untrusted
+  code.
+
+import-linter is a contract checker built *on* grimp, relevant only if the
+product ever offers user-defined architecture rules. Not today.
+
+**The evaluation was still worth it, because it identified the real defect.**
+Relative imports were producing `/helpers.py` and `//core.py` — keys matching no
+file — so every intra-package edge disappeared. Packages that use relative
+imports internally, which is most well-factored ones, showed no cycles and near
+zero internal coupling and read as maximally stable. The fix is a resolver over
+the file list we already have: dots counted, path walked up, candidates checked
+against real files, unresolved targets classified external instead of invented.
+That closes four of the five known weaknesses with no dependency, no second code
+path, and identical behaviour across languages. Source roots are derived from
+where top-level packages actually sit, so src-layout resolves too.
+
+Reconsider grimp if the product starts reporting Python-specific facts that need
+true module semantics — import line numbers, `TYPE_CHECKING` classification,
+external dependency inventories — or if user-defined contracts arrive.
 
 ## Consequences
 
-Two of the seven listed libraries are adopted, one is declined on measurement
-and one on threat model. The plan's list is treated as a set of candidates
-rather than a set of instructions, and each decision carries the number or the
-argument that produced it — so it can be overturned by better evidence rather
-than by preference.
+Two of the seven listed libraries are adopted; five are declined. Each decision
+carries the number or the argument that produced it — NetworkX on a benchmark,
+PyDriller on a benchmark, `limits` on inspecting the exact defect it was meant
+to prevent, argon2-cffi on the threat model, grimp on fit — so any of them can
+be overturned by better evidence rather than by preference.
+
+The plan's list is treated as candidates, not instructions. That is not a
+licence to skip work: two of the evaluations changed the code anyway. lizard
+exposed 40 build artifacts being analysed as source, and the grimp evaluation
+found that relative imports were corrupting the dependency graph. Evaluating a
+library honestly is worth doing even when the answer is no.
