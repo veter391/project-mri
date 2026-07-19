@@ -199,17 +199,38 @@ async def test_complexity_excludes_comments_from_code(tmp: Path):
     assert 0.4 < ratio < 0.6, f"comment_ratio={ratio} — comments not being excluded"
 
 
-async def test_comment_ratio_is_null_when_parser_absent(tmp: Path, monkeypatch):
-    """Without a tree-sitter parser no lines are scanned; comment_ratio must be
-    null — a 0.0 would falsely read as 'documented nothing' rather than
-    'not measured'."""
+async def test_comment_ratio_is_null_when_nothing_was_measured(tmp: Path):
+    """A repository with no source files has no comment ratio. Reporting 0.0
+    would read as "documented nothing" rather than "not measured" — different
+    claims, and only one of them is true.
+
+    This guarantee used to be phrased as "when the parser is absent", because
+    comment counting sat behind a tree-sitter branch. It never needed a parser —
+    it is two regexes — so the condition is now the honest one.
+    """
     import mri.analyzers.complexity as cx
 
-    monkeypatch.setattr(cx, "_HAS_TS", False)
-    ctx = _make_ctx(tmp, {"a.py": "\n".join(["# c"] * 10 + ["x = 1"] * 10)})
+    ctx = _make_ctx(tmp, {"README.md": "# a heading\ntext\n", "data.json": "{}\n"})
     a = cx.ComplexityAnalyzer()
     a.analyze(ctx)
     assert a.run.signals["comment_ratio"] is None
+
+
+async def test_comment_ratio_ignores_files_that_cannot_have_comments(tmp: Path):
+    """Markdown and JSON must not dilute the ratio: `# heading` in markdown is
+    not a comment, and JSON has none at all. The old tree-sitter gate excluded
+    them as a side effect; the exclusion is now deliberate."""
+    import mri.analyzers.complexity as cx
+
+    ctx = _make_ctx(tmp, {
+        "a.py": "\n".join(["# c"] * 50 + ["x = 1"] * 50),
+        "README.md": "\n".join(["# heading"] * 500),
+        "data.json": "{}\n",
+    })
+    a = cx.ComplexityAnalyzer()
+    a.analyze(ctx)
+    ratio = a.run.signals["comment_ratio"]
+    assert 0.4 < ratio < 0.6, f"comment_ratio={ratio} — non-source files leaked in"
 
 
 # ---------------------------------------------------------------------------
