@@ -22,6 +22,17 @@ from mri.db.migrator import (
 )
 
 BASELINE = "0001_initial_schema.sql"
+FUSION = "0002_fusion_model.sql"
+
+
+def _all_migrations() -> list[str]:
+    """Every migration the package ships, in order.
+
+    These tests used to hardcode "the baseline is the only migration", which
+    made adding one break five of them at once. They assert the runner's
+    behaviour instead: what it applies, once each, in order.
+    """
+    return [m.name for m in migrator._discover()]
 CORE_TABLES = {"scans", "projects", "findings", "analyzer_runs", "users"}
 
 
@@ -46,10 +57,11 @@ def db(tmp_path: Path) -> Path:
     return tmp_path / "mri.db"
 
 
-def test_fresh_database_gets_the_baseline(db: Path):
-    assert migrate(db) == [BASELINE]
+def test_fresh_database_gets_every_migration(db: Path):
+    applied = migrate(db)
+    assert applied == _all_migrations(), "a fresh database must end up fully migrated, in order"
     assert CORE_TABLES <= _tables(db)
-    assert applied_migrations(db) == {BASELINE}
+    assert applied_migrations(db) == set(_all_migrations())
 
 
 def test_migrate_is_idempotent(db: Path):
@@ -84,8 +96,11 @@ def test_pre_migrations_database_is_stamped_not_rebuilt(db: Path):
     finally:
         conn.close()
 
-    assert migrate(db) == []  # stamped, nothing executed
-    assert applied_migrations(db) == {BASELINE}
+    # The baseline is stamped rather than re-run; anything newer still applies.
+    applied = migrate(db)
+    assert BASELINE not in applied, "the baseline was re-run against existing tables"
+    assert applied == [m for m in _all_migrations() if m != BASELINE]
+    assert applied_migrations(db) == set(_all_migrations())
 
     conn = sqlite3.connect(db)
     try:
@@ -98,19 +113,22 @@ def test_failed_migration_leaves_no_trace(db: Path, monkeypatch: pytest.MonkeyPa
     """Atomicity. A migration that fails partway must roll back completely and
     must not be recorded, so the next run retries it."""
     real_discover = migrator._discover
+    genuine = set(_all_migrations())  # snapshot: _discover is about to be patched
 
     def with_broken() -> list[Migration]:
         return real_discover() + [
-            Migration("0002_broken.sql", "CREATE TABLE half_applied(x);\nCREATE TABLE oops( ;\n")
+            Migration("9999_broken.sql", "CREATE TABLE half_applied(x);\nCREATE TABLE oops( ;\n")
         ]
 
     monkeypatch.setattr(migrator, "_discover", with_broken)
 
-    with pytest.raises(MigrationError, match="0002_broken.sql"):
+    with pytest.raises(MigrationError, match="9999_broken.sql"):
         migrate(db)
 
     assert "half_applied" not in _tables(db)
-    assert applied_migrations(db) == {BASELINE}
+    assert applied_migrations(db) == genuine, (
+        "the broken migration must not be recorded, and the good ones must be"
+    )
 
 
 def test_concurrent_migrations_apply_exactly_once(db: Path):
@@ -134,7 +152,9 @@ def test_concurrent_migrations_apply_exactly_once(db: Path):
 
     assert not errors, f"concurrent migration errored: {errors}"
     applied = [name for r in results for name in r]
-    assert applied == [BASELINE], f"baseline applied {len(applied)} times, expected once"
+    assert sorted(applied) == sorted(_all_migrations()), (
+        f"each migration must be applied exactly once across all workers, got {applied}"
+    )
     assert CORE_TABLES <= _tables(db)
 
 
@@ -186,8 +206,9 @@ def test_a_genuine_v030_database_is_still_stamped(db: Path):
     finally:
         conn.close()
 
-    assert migrate(db) == []
-    assert applied_migrations(db) == {BASELINE}
+    applied = migrate(db)
+    assert BASELINE not in applied, "a genuine v0.3.x database must be stamped, not rebuilt"
+    assert applied_migrations(db) == set(_all_migrations())
 
 
 def test_cli_scan_is_recorded_so_list_can_show_it(db: Path, tmp_path: Path):
