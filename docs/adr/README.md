@@ -12,6 +12,7 @@ decision, and what it costs — including decisions that were later superseded.
 | [005](ADR-005-schema-migrations.md) | Schema migrations for the local SQLite database | Accepted |
 | [006](ADR-006-oss-adoption.md) | Which libraries we adopt, and which we do not | Accepted |
 | [007](ADR-007-duckdb-deferred.md) | DuckDB is deferred, not adopted | Accepted |
+| [008](ADR-008-authorship-line-shares-deferred.md) | Authorship line-shares deferred; risk weighted by evidence | Accepted |
 
 ## Conventions
 
