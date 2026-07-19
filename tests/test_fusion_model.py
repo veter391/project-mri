@@ -286,7 +286,7 @@ async def test_round_trip_preserves_every_guarantee(db: Path):
                 confounders=["a refactor landed in the same window"], confidence=0.35,
             ),
         )
-        found = await repo.consequences_for_decision(conn, decision.id)
+        found = await repo.consequences_for_decision(conn, decision.id, project_id=pid)
         assert found[0].causal_claim == "correlation"
         assert found[0].confounders == ["a refactor landed in the same window"], (
             "confounders must survive storage — they are the caveat on the claim"
@@ -386,7 +386,7 @@ async def test_one_damaged_row_does_not_take_down_the_read(db: Path):
     unreadable — and the damage must be visible rather than smoothed over."""
     conn = sqlite3.connect(db)
     try:
-        conn.execute("INSERT INTO decisions (summary, source) VALUES ('d', 'commit')")
+        conn.execute("INSERT INTO decisions (summary, source, project_id) VALUES ('d', 'commit', 1)")
         for metric, confounders in (("good", '["a real caveat"]'), ("bad", "not-json")):
             conn.execute(
                 "INSERT INTO consequences (decision_id, metric, window_start, window_end,"
@@ -398,7 +398,7 @@ async def test_one_damaged_row_does_not_take_down_the_read(db: Path):
         conn.close()
 
     async with get_connection(db) as conn:
-        found = {c.metric: c.confounders for c in await repo.consequences_for_decision(conn, 1)}
+        found = {c.metric: c.confounders for c in await repo.consequences_for_decision(conn, 1, project_id=1)}
     assert found["good"] == ["a real caveat"]
     assert found["bad"] == [repo.UNREADABLE_CONFOUNDERS], (
         "a damaged caveat must report itself as damaged, not as an empty list — "

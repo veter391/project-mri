@@ -33,6 +33,7 @@ from mri.models.fusion import (
 _UTC = timezone.utc
 
 __all__ = [
+    "CrossProjectSessionError",
     "authorship_for_file",
     "insert_session_events",
     "insert_session_file_touches",
@@ -147,13 +148,49 @@ def _confounders(raw: Any, *, row_id: Any) -> list[str]:
     return [str(item) for item in decoded]
 
 
+class CrossProjectSessionError(RuntimeError):
+    """A session id already recorded under one project was re-ingested under
+    another. A real agent-session id is globally unique and belongs to one
+    workspace, so this only happens through a forged or corrupted log — and
+    silently reassigning it hijacked (and, via rewrite-detection, could delete)
+    the first project's data. It is refused rather than obeyed."""
+
+
 async def upsert_session(conn: aiosqlite.Connection, session: Session) -> Session:
     """Record a session, or return the existing one.
 
-    Sessions are keyed by (source, external_id) so re-ingesting the same log is
-    idempotent — a scan that runs twice must not double-count a session's
-    influence on attribution.
+    Sessions are keyed by (source, external_id): a real agent-session id is a
+    globally-unique UUID that happened in exactly one workspace, so identity is
+    global and re-ingesting the same log is idempotent.
+
+    Two project transitions are handled explicitly rather than by a blind
+    `project_id = excluded.project_id`, which an audit showed could hijack or
+    delete another project's data:
+
+      * unclaimed -> claimed (project_id was NULL, now real): the session is
+        *adopted* by the project, and its already-stored touches are backfilled
+        to it so a scan-then-register workflow does not strand them at NULL;
+      * one real project -> a different real project: refused. A globally-unique
+        id cannot legitimately belong to two projects, so this is forgery or
+        corruption, not a re-scan.
     """
+    existing = await get_session(conn, session.source, session.external_id)
+    if (
+        existing is not None
+        and existing.project_id is not None
+        and session.project_id is not None
+        and existing.project_id != session.project_id
+    ):
+        raise CrossProjectSessionError(
+            f"session {session.source}/{session.external_id} is already recorded under "
+            f"project {existing.project_id}; refusing to move it to {session.project_id}"
+        )
+
+    # Keep an existing project link if this ingest did not supply one, so a
+    # metadata-only re-run cannot un-claim a session.
+    effective_project = session.project_id if session.project_id is not None else (
+        existing.project_id if existing else None
+    )
     await conn.execute(
         """
         INSERT INTO sessions
@@ -169,17 +206,26 @@ async def upsert_session(conn: aiosqlite.Connection, session: Session) -> Sessio
         (
             session.source,
             session.external_id,
-            session.project_id,
+            effective_project,
             session.workspace_path,
             _iso(session.started_at),
             _iso(session.ended_at),
             int(session.content_stored),
         ),
     )
-    await conn.commit()
     stored = await get_session(conn, session.source, session.external_id)
     if stored is None:  # pragma: no cover - the row was just written
         raise RuntimeError(f"session vanished after upsert: {session.source}/{session.external_id}")
+
+    # Adoption: a session that was unclaimed and is now claimed backfills the
+    # project onto touches written while it was unclaimed, so they become
+    # visible to the project's file-keyed reads instead of stranded at NULL.
+    if existing is not None and existing.project_id is None and effective_project is not None:
+        await conn.execute(
+            "UPDATE session_file_touches SET project_id = ? WHERE session_id = ? AND project_id IS NULL",
+            (effective_project, stored.id),
+        )
+    await conn.commit()
     return stored
 
 
@@ -509,11 +555,19 @@ async def insert_consequence(
 
 
 async def consequences_for_decision(
-    conn: aiosqlite.Connection, decision_id: int, *, limit: int = 100
+    conn: aiosqlite.Connection, decision_id: int, *, project_id: int, limit: int = 100
 ) -> list[Consequence]:
+    """Consequences of one decision, scoped to its project.
+
+    `project_id` is required and checked against the owning decision, so a
+    future endpoint that accepts a decision id from a request cannot read
+    another project's consequences by guessing an id (the ids are sequential).
+    """
     cursor = await conn.execute(
-        "SELECT * FROM consequences WHERE decision_id = ? ORDER BY window_end DESC LIMIT ?",
-        (decision_id, _limit(limit)),
+        "SELECT c.* FROM consequences c JOIN decisions d ON d.id = c.decision_id"
+        " WHERE c.decision_id = ? AND d.project_id = ?"
+        " ORDER BY c.window_end DESC LIMIT ?",
+        (decision_id, project_id, _limit(limit)),
     )
     out: list[Consequence] = []
     for row in await cursor.fetchall():

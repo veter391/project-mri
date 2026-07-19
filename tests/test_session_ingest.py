@@ -39,10 +39,10 @@ def _log(path: Path, records: list[dict]) -> Path:
     return path
 
 
-def _turn(seq: int, role: str, cwd: str, parts: list[dict]) -> dict:
+def _turn(seq: int, role: str, cwd: str, parts: list[dict], session_id: str = "sess-1") -> dict:
     return {
         "type": role,
-        "sessionId": "sess-1",
+        "sessionId": session_id,
         "cwd": cwd,
         "timestamp": f"2026-07-{seq + 1:02d}T10:00:00.000Z",
         "message": {"content": parts},
@@ -476,9 +476,13 @@ async def test_ingest_then_authorship_end_to_end_and_project_scoped(
     from mri.fusion import weight_hotspots
 
     cwd = str(repo_root)
+    # Distinct session ids: two real repos never share a session id, and reusing
+    # one made an earlier version of this test a false positive — it passed
+    # because the second ingest *deleted* the first's data, not because scoping
+    # isolated it.
     log = _log(tmp_path / "s.jsonl", [
-        _turn(1, "assistant", cwd, [_use("Write", str(repo_root / "src" / "a.py"), "u1")]),
-        _turn(2, "user", cwd, [_result("u1")]),
+        _turn(1, "assistant", cwd, [_use("Write", str(repo_root / "src" / "a.py"), "u1")], "sess-mine"),
+        _turn(2, "user", cwd, [_result("u1")], "sess-mine"),
     ])
     async with get_connection(db) as conn:
         mine = int((await conn.execute(
@@ -491,16 +495,64 @@ async def test_ingest_then_authorship_end_to_end_and_project_scoped(
 
         # Another project's session wrote a same-named file.
         other_log = _log(tmp_path / "o.jsonl", [
-            _turn(1, "assistant", cwd, [_use("Write", str(repo_root / "src" / "a.py"), "x1")]),
-            _turn(2, "user", cwd, [_result("x1")]),
+            _turn(1, "assistant", cwd, [_use("Write", str(repo_root / "src" / "a.py"), "x1")], "sess-other"),
+            _turn(2, "user", cwd, [_result("x1")], "sess-other"),
         ])
         await ingest_log(conn, other_log, repo_root=repo_root, project_id=other)
 
         await ingest_log(conn, log, repo_root=repo_root, project_id=mine)
 
+        # Both sessions survive; each project sees only its own touch.
         weighted = await weight_hotspots(conn, {"src/a.py": 50.0}, project_id=mine)
         assert weighted[0].evidence.ai_write_touches == 1, "only my project's touch counts"
         assert weighted[0].weighted_risk == 45.0
+        other_w = await weight_hotspots(conn, {"src/a.py": 50.0}, project_id=other)
+        assert other_w[0].evidence.ai_write_touches == 1, "the other project still has its own"
+
+
+async def test_a_session_id_cannot_be_hijacked_across_projects(
+    db: Path, tmp_path: Path, repo_root: Path
+):
+    """A real agent-session id is globally unique and belongs to one workspace.
+    Re-ingesting it under a different project is forgery/corruption, and silently
+    obeying it hijacked — and could delete — the first project's data. Refused."""
+    from mri.db.fusion_repository import CrossProjectSessionError
+
+    cwd = str(repo_root)
+    log = _log(tmp_path / "s.jsonl", [
+        _turn(1, "assistant", cwd, [_use("Write", str(repo_root / "src" / "a.py"), "u1")], "dup"),
+        _turn(2, "user", cwd, [_result("u1")], "dup"),
+    ])
+    async with get_connection(db) as conn:
+        a = int((await conn.execute("INSERT INTO projects (name, path) VALUES ('a', '/a')")).lastrowid)
+        b = int((await conn.execute("INSERT INTO projects (name, path) VALUES ('b', '/b')")).lastrowid)
+        await conn.commit()
+        await ingest_log(conn, log, repo_root=repo_root, project_id=a)
+        with pytest.raises(CrossProjectSessionError):
+            await ingest_log(conn, log, repo_root=repo_root, project_id=b)
+        # A's data is intact.
+        assert len(await repo.touches_for_file(conn, "src/a.py", project_id=a)) == 1
+
+
+async def test_an_unclaimed_session_is_adopted_and_its_touches_backfilled(
+    db: Path, tmp_path: Path, repo_root: Path
+):
+    """Scan-then-register: a session first ingested with no project, then with a
+    real one, must not strand its touches at project_id NULL."""
+    cwd = str(repo_root)
+    log = _log(tmp_path / "s.jsonl", [
+        _turn(1, "assistant", cwd, [_use("Write", str(repo_root / "src" / "a.py"), "u1")], "later"),
+        _turn(2, "user", cwd, [_result("u1")], "later"),
+    ])
+    async with get_connection(db) as conn:
+        pid = int((await conn.execute("INSERT INTO projects (name, path) VALUES ('p', '/p')")).lastrowid)
+        await conn.commit()
+        await ingest_log(conn, log, repo_root=repo_root, project_id=None)   # unclaimed
+        assert len(await repo.touches_for_file(conn, "src/a.py", project_id=pid)) == 0
+        await ingest_log(conn, log, repo_root=repo_root, project_id=pid)    # claimed
+        assert len(await repo.touches_for_file(conn, "src/a.py", project_id=pid)) == 1, (
+            "adoption must backfill the touches written while unclaimed"
+        )
 
 
 async def test_a_touch_is_linked_to_the_turn_that_produced_it(
