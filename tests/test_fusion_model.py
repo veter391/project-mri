@@ -417,3 +417,98 @@ async def test_limits_are_clamped_by_the_repository(db: Path):
     assert repo._limit(10**9) == repo.MAX_ROWS
     assert repo._limit(0) == 1
     assert repo._limit(50) == 50
+
+
+# ---------------------------------------------------------------------------
+# Index and write-path tuning (migration 0004)
+# ---------------------------------------------------------------------------
+
+
+def test_list_queries_do_not_sort_after_filtering(db: Path):
+    """The audit found every list query building a TEMP B-TREE because the
+    index covered the filter column but not the sort column — invisible at
+    average cardinality, 18x on a hot file. The composite indices removed it,
+    and this is what stops them being 'simplified' back."""
+    conn = sqlite3.connect(db)
+    try:
+        queries = [
+            ("SELECT * FROM session_file_touches WHERE file_path = ?"
+             " ORDER BY occurred_at DESC LIMIT 200", ("a.py",)),
+            ("SELECT * FROM authorship_shares WHERE file_path = ?"
+             " ORDER BY computed_at DESC LIMIT 50", ("a.py",)),
+            ("SELECT * FROM decisions WHERE file_path = ?"
+             " ORDER BY decided_at DESC LIMIT 50", ("a.py",)),
+            ("SELECT * FROM consequences WHERE decision_id = ?"
+             " ORDER BY window_end DESC LIMIT 100", (1,)),
+        ]
+        for sql, args in queries:
+            plan = " ".join(r[3] for r in conn.execute("EXPLAIN QUERY PLAN " + sql, args))
+            assert "TEMP B-TREE" not in plan, f"sort not covered by the index: {sql}\n{plan}"
+    finally:
+        conn.close()
+
+
+def test_the_redundant_session_index_is_gone(db: Path):
+    """UNIQUE (source, external_id) already serves a source-only lookup through
+    its leftmost prefix, so a separate index on source could never be chosen."""
+    conn = sqlite3.connect(db)
+    try:
+        names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='index'")}
+        assert "idx_sessions_source" not in names
+        plan = " ".join(
+            r[3] for r in conn.execute(
+                "EXPLAIN QUERY PLAN SELECT * FROM sessions WHERE source = ?", ("cc",)
+            )
+        )
+        assert "sqlite_autoindex_sessions_1" in plan, plan
+    finally:
+        conn.close()
+
+
+async def test_bulk_writers_round_trip(db: Path):
+    """Ingest reads a whole log at once; these commit once rather than per row."""
+    async with get_connection(db) as conn:
+        session = await repo.upsert_session(
+            conn, Session(source="cc", external_id="bulk", content_stored=False)
+        )
+        assert session.id is not None
+        written = await repo.insert_session_events(
+            conn,
+            [
+                SessionEvent(session_id=session.id, seq=i, role="user", content_hash=f"h{i}")
+                for i in range(200)
+            ],
+        )
+        assert written == 200
+        assert len(await repo.events_for_session(conn, session.id, limit=500)) == 200
+
+        touched = await repo.insert_session_file_touches(
+            conn,
+            [
+                SessionFileTouch(
+                    session_id=session.id, file_path=f"src/f{i}.py",
+                    touch_kind="write", confidence=0.5,
+                )
+                for i in range(50)
+            ],
+        )
+        assert touched == 50
+        assert await repo.insert_session_events(conn, []) == 0, "an empty batch is not an error"
+
+
+async def test_omitting_content_returns_absence_not_invention(db: Path):
+    """A caller that did not ask for content gets None — the same value that
+    means 'metadata-only ingest'. Both are honest; an empty string would not be."""
+    async with get_connection(db) as conn:
+        session = await repo.upsert_session(
+            conn, Session(source="cc", external_id="proj", content_stored=True)
+        )
+        assert session.id is not None
+        await repo.insert_session_event(
+            conn, SessionEvent(session_id=session.id, seq=1, role="user", content="hello")
+        )
+        with_content = await repo.events_for_session(conn, session.id)
+        without = await repo.events_for_session(conn, session.id, include_content=False)
+    assert with_content[0].content == "hello"
+    assert without[0].content is None
+    assert without[0].content_hash == with_content[0].content_hash

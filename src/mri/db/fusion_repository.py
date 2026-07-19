@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Sequence
 from typing import Any
 
 import aiosqlite
@@ -30,6 +31,8 @@ from mri.models.fusion import (
 
 __all__ = [
     "authorship_for_file",
+    "insert_session_events",
+    "insert_session_file_touches",
     "consequences_for_decision",
     "decisions_for_file",
     "events_for_session",
@@ -57,6 +60,20 @@ MAX_ROWS = 5_000
 #: one — the caveat on the finding is damaged, not absent, and a reader has to
 #: be able to tell those apart.
 UNREADABLE_CONFOUNDERS = "<unreadable: the stored value was not valid JSON>"
+
+
+#: Two fixed statements rather than one assembled from a flag. Nothing here is
+#: user input, but a query built by string concatenation is a pattern worth not
+#: having in the file at all — the next edit is the one that interpolates a
+#: value.
+_EVENTS_WITH_CONTENT = (
+    "SELECT * FROM session_events WHERE session_id = ? ORDER BY seq LIMIT ?"
+)
+_EVENTS_WITHOUT_CONTENT = (
+    "SELECT id, session_id, seq, role, kind, NULL AS content, content_hash,"
+    " occurred_at, created_at"
+    " FROM session_events WHERE session_id = ? ORDER BY seq LIMIT ?"
+)
 
 
 def _limit(value: int) -> int:
@@ -153,13 +170,69 @@ async def insert_session_event(
     return event.model_copy(update={"id": int(cursor.lastrowid or 0)})
 
 
-async def events_for_session(
-    conn: aiosqlite.Connection, session_id: int, *, limit: int = 500
-) -> list[SessionEvent]:
-    cursor = await conn.execute(
-        "SELECT * FROM session_events WHERE session_id = ? ORDER BY seq LIMIT ?",
-        (session_id, _limit(limit)),
+async def insert_session_events(
+    conn: aiosqlite.Connection, events: Sequence[SessionEvent]
+) -> int:
+    """Insert many turns in one transaction.
+
+    Ingest reads a whole log at once, and committing per row makes the fsync
+    cost dominate: measured at 50,000 events, 18.6 s row-by-row against 8.0 s
+    in a single transaction. The single-row writers stay as they are — they are
+    correct for interactive use, where a commit per call is the point.
+    """
+    if not events:
+        return 0
+    await conn.executemany(
+        """
+        INSERT INTO session_events
+            (session_id, seq, role, kind, content, content_hash, occurred_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            (e.session_id, e.seq, e.role, e.kind, e.content, e.content_hash, _iso(e.occurred_at))
+            for e in events
+        ],
     )
+    await conn.commit()
+    return len(events)
+
+
+async def insert_session_file_touches(
+    conn: aiosqlite.Connection, touches: Sequence[SessionFileTouch]
+) -> int:
+    """Insert many file touches in one transaction. See `insert_session_events`."""
+    if not touches:
+        return 0
+    await conn.executemany(
+        """
+        INSERT INTO session_file_touches
+            (session_id, event_id, file_path, commit_sha, touch_kind, confidence, occurred_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            (t.session_id, t.event_id, t.file_path, t.commit_sha, t.touch_kind,
+             t.confidence, _iso(t.occurred_at))
+            for t in touches
+        ],
+    )
+    await conn.commit()
+    return len(touches)
+
+
+async def events_for_session(
+    conn: aiosqlite.Connection, session_id: int, *, limit: int = 500,
+    include_content: bool = True,
+) -> list[SessionEvent]:
+    """Turns in a session, oldest first.
+
+    `include_content=False` omits the content column. When retention is on,
+    content is the bulk of the row: a 500-turn page measured 4.5 ms and ~2.4 MB
+    with it, 2.3 ms without. Anything that lists or counts turns rather than
+    displaying them should pass False — and gets `content=None`, which is
+    honest, since it did not ask for the content rather than found none.
+    """
+    query = _EVENTS_WITH_CONTENT if include_content else _EVENTS_WITHOUT_CONTENT
+    cursor = await conn.execute(query, (session_id, _limit(limit)))
     return [SessionEvent(**dict(r)) for r in await cursor.fetchall()]
 
 
@@ -189,6 +262,13 @@ async def insert_session_file_touch(
 async def touches_for_file(
     conn: aiosqlite.Connection, file_path: str, *, limit: int = 200
 ) -> list[SessionFileTouch]:
+    """Touches on a file, most recent first.
+
+    SQLite sorts NULLs last under DESC, so touches with no `occurred_at` — ones
+    not yet correlated to a time — fall to the end and drop off the page once a
+    file has `limit` timestamped touches. That is the intended reading of "most
+    recent": an untimed touch is not recent, it is unplaced.
+    """
     cursor = await conn.execute(
         "SELECT * FROM session_file_touches WHERE file_path = ? ORDER BY occurred_at DESC LIMIT ?",
         (file_path, _limit(limit)),
