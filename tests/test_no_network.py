@@ -18,7 +18,7 @@ import pytest
 from mri.db.migrator import migrate
 from mri.db.repository import connect_sync, get_connection
 from mri.ingest import ingest_workspace
-from mri.services.scanner import ScanOptions, Scanner
+from mri.services.scanner import Scanner, ScanOptions
 
 
 def _is_loopback(address: object) -> bool:
