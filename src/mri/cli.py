@@ -1,4 +1,4 @@
-"""`mri` CLI — subcommands: init, scan, fusion, serve, watch, demo, backup, restore, upgrade, reset, ui."""
+"""`mri` CLI — subcommands: init, scan, fusion, eval, serve, watch, demo, backup, restore, upgrade, reset, ui."""
 from __future__ import annotations
 
 import getpass
@@ -278,6 +278,62 @@ def fusion(project_path: str, top: int, store_content: bool, json_out: str | Non
             Path(json_out).write_text(_json.dumps(payload, indent=2), encoding="utf-8")
             if not quiet:
                 click.echo(f"  ✓ JSON → {json_out}", err=True)
+
+    asyncio.run(go())
+
+
+# ---------------------------------------------------------------------------
+# mri eval — validate the fusion numbers against known ground truth
+# ---------------------------------------------------------------------------
+
+
+@cli.command("eval")
+@click.option("--json-out", default=None, help="Write the eval report as JSON to this path")
+def eval_cmd(json_out: str | None) -> None:
+    """Run the evaluation harness: calibrate the fusion numbers against a labeled
+    corpus and assert the product never over-claims.
+
+    Builds scenarios whose true AI-authorship is known, runs the whole fusion
+    loop over them, and reports the error between computed and true shares plus
+    the over-claim guard. Exits non-zero if any share drifts past tolerance or
+    any honesty invariant is violated — this is the hard gate.
+    """
+    import asyncio
+    import json as _json
+
+    async def go() -> None:
+        from mri.eval import run_eval
+
+        report = await run_eval()
+
+        click.echo(f"eval corpus: {report.case}", err=True)
+        for path, (expected, computed, err) in sorted(report.calibration.items()):
+            mark = "ok" if err <= 2.0 else "OFF"
+            click.echo(f"  [{mark}] {path:16} truth={expected:5.1f}%  computed={computed:5.1f}%  err={err:.2f}")
+        click.echo(f"  correlation recall: {report.correlation_recall:.2f}", err=True)
+        click.echo(f"  over-claim violations: {len(report.violations)}", err=True)
+        for v in report.violations:
+            click.echo(f"    ✗ {v.rule}: {v.detail} ({v.ref})", err=True)
+
+        if json_out:
+            payload = {
+                "case": report.case,
+                "calibration": {
+                    p: {"expected": e, "computed": c, "error": err}
+                    for p, (e, c, err) in report.calibration.items()
+                },
+                "correlation_recall": report.correlation_recall,
+                "violations": [{"rule": v.rule, "detail": v.detail, "ref": v.ref}
+                               for v in report.violations],
+                "passed": report.passed,
+            }
+            Path(json_out).write_text(_json.dumps(payload, indent=2), encoding="utf-8")
+
+        if report.passed:
+            click.echo("✓ eval passed: numbers calibrated, no over-claim", err=True)
+        else:
+            click.echo("✗ eval FAILED", err=True)
+            sys.exit(1)
 
     asyncio.run(go())
 
