@@ -105,9 +105,10 @@ async def test_a_clean_project_has_no_violations(tmp_path: Path):
 def test_mri_eval_cli_passes_and_gates(tmp_path: Path):
     """The `mri eval` command runs the harness and exits 0 when calibrated and
     clean — the CI gate."""
+    from mri.cli import cli
+
     out = tmp_path / "eval.json"
-    result = CliRunner().invoke(cli := __import__("mri.cli", fromlist=["cli"]).cli,
-                                ["eval", "--json-out", str(out)])
+    result = CliRunner().invoke(cli, ["eval", "--json-out", str(out)])
     assert result.exit_code == 0, result.output
     assert "eval passed" in result.output
     import json

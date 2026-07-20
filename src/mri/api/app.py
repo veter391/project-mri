@@ -30,6 +30,7 @@ from mri.api.middleware import (
     SecurityHeadersMiddleware,
 )
 from mri.api.routes import demo as demo_routes
+from mri.api.routes import fusion as fusion_routes
 from mri.api.routes import health as health_routes
 from mri.api.routes import scans as scans_routes
 from mri.auth import router as auth_router
@@ -144,6 +145,7 @@ def create_app() -> FastAPI:
     # ---- Routes ----
     app.include_router(health_routes.router)
     app.include_router(scans_routes.router)
+    app.include_router(fusion_routes.router)
     app.include_router(demo_routes.router)
     app.include_router(auth_router)
     app.include_router(metrics_router)
