@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import git
 import pytest
 
 mcp = pytest.importorskip("mcp", reason="MCP surface needs the optional 'mcp' extra")
@@ -66,6 +67,24 @@ def _seed(db: Path, project_dir: Path) -> str:
     return project_path
 
 
+def _make_git_repo(path: Path) -> None:
+    """A minimal real git repo with one commit, for the heavy fuse_project path."""
+    path.mkdir(parents=True, exist_ok=True)
+    repo = git.Repo.init(path)
+    (path / "app.py").write_text("print('hi')\n", encoding="utf-8")
+    repo.index.add(["app.py"])
+    actor = git.Actor("t", "t@t")
+    repo.index.commit("init", author=actor, committer=actor)
+
+
+def _project_count(db: Path) -> int:
+    conn = connect_sync(db)
+    try:
+        return int(conn.execute("SELECT COUNT(*) FROM projects").fetchone()[0])
+    finally:
+        conn.close()
+
+
 def _text(result) -> str:
     """The text payload of a tool result, across SDK shapes."""
     parts = [c.text for c in result.content if getattr(c, "type", None) == "text"]
@@ -118,3 +137,74 @@ async def test_authorship_of_an_uncomputed_file_is_an_honest_unknown(tmp_path: P
         )
         payload = json.loads(_text(r))
     assert payload["computed"] is False, "no share computed is an explicit unknown, not a zero"
+
+
+async def test_fuse_project_runs_over_a_real_repo_through_the_protocol(tmp_path: Path):
+    """The heavy tool, exercised end-to-end against a real git repo. A fresh
+    repo has no sessions, so every stage count is zero — but the documented
+    shape must come back intact, proving the git path and the write succeed."""
+    db = tmp_path / "mcp.db"
+    migrate(db)
+    repo_dir = tmp_path / "repo"
+    _make_git_repo(repo_dir)
+    server = build_server(db_path=db)
+    async with create_connected_server_and_client_session(server._mcp_server) as client:
+        await client.initialize()
+        r = await client.call_tool("fuse_project", {"project_path": str(repo_dir), "top": 5})
+        assert not r.isError, _text(r)
+        payload = json.loads(_text(r))
+    assert {"sessions", "touches", "correlated", "decisions", "authored_files", "files"} <= set(payload)
+    assert set(payload["decisions"]) == {"adr", "commit", "links"}
+
+
+async def test_fuse_project_on_a_non_repo_is_a_clean_error(tmp_path: Path):
+    """A directory that is not a git repo yields the CLI's message through the
+    protocol, not a raw GitPython stack trace."""
+    db = tmp_path / "mcp.db"
+    migrate(db)
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    server = build_server(db_path=db)
+    async with create_connected_server_and_client_session(server._mcp_server) as client:
+        await client.initialize()
+        r = await client.call_tool("fuse_project", {"project_path": str(plain)})
+    assert r.isError
+    assert "not a git repository" in _text(r)
+
+
+async def test_read_tools_never_create_a_project_row(tmp_path: Path):
+    """A read over an unknown path is an honest 'no evidence' and, critically,
+    writes nothing — reads must not mint a project row or bump last_scanned."""
+    db = tmp_path / "mcp.db"
+    migrate(db)
+    server = build_server(db_path=db)
+    unknown = str((tmp_path / "never_scanned").resolve())
+    async with create_connected_server_and_client_session(server._mcp_server) as client:
+        await client.initialize()
+        r = await client.call_tool("get_authorship", {"project_path": unknown, "file_path": "x.py"})
+        assert json.loads(_text(r))["computed"] is False
+        r = await client.call_tool("explain_file", {"project_path": unknown, "file_path": "x.py"})
+        assert "no fusion evidence" in _text(r)
+        r = await client.call_tool("get_decisions", {"project_path": unknown, "file_path": "x.py"})
+        assert json.loads(_text(r))["decisions"] == []
+    assert _project_count(db) == 0, "a read tool wrote a project row — reads must not write"
+
+
+async def test_file_path_is_sanitized_in_read_tool_output(tmp_path: Path):
+    """A filename carrying a terminal escape must not round-trip verbatim into a
+    tool result an MCP host renders to a terminal."""
+    db = tmp_path / "mcp.db"
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+    project_path = _seed(db, project_dir)
+    server = build_server(db_path=db)
+    dirty = "app\x1b[31m.py\x1b[0m"
+    async with create_connected_server_and_client_session(server._mcp_server) as client:
+        await client.initialize()
+        # Inspect the PARSED field, not the JSON text: json.dumps escapes the ESC
+        # byte to a unicode escape sequence, so a substring check on the raw text
+        # passes even when the control char round-trips. Decode first, then assert.
+        r = await client.call_tool("get_authorship", {"project_path": project_path, "file_path": dirty})
+        assert "\x1b" not in json.loads(_text(r))["file"], "escape survived into get_authorship"
+        r = await client.call_tool("get_decisions", {"project_path": project_path, "file_path": dirty})
+        assert "\x1b" not in json.loads(_text(r))["file"], "escape survived into get_decisions"

@@ -351,11 +351,9 @@ def mcp() -> None:
     agent can ask who authored a file and what decided it, mid-task. Needs the
     optional MCP dependency: `pip install project-mri[mcp]`.
     """
-    try:
-        from mri.mcp_server import build_server
-    except ModuleNotFoundError as e:
-        click.echo(f"✗ {e}", err=True)
-        sys.exit(1)
+    # build_server defers the optional `mcp` import, so a missing dependency
+    # surfaces as a ModuleNotFoundError here, not at module import time.
+    from mri.mcp_server import build_server
 
     try:
         server = build_server()
