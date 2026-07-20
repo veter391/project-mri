@@ -17,6 +17,7 @@ decision, and what it costs — including decisions that were later superseded.
 | [010](ADR-010-git-notes-provenance-deferred.md) | git-notes/Agent Trace deferred; commit trailers are the verifiable slice | Accepted |
 | [011](ADR-011-base-risk-composition.md) | Provenance is not folded into risk; authorship-weighted risk is a bounded triage signal | Accepted |
 | [012](ADR-012-session-reasoning-mining-deferred.md) | Reasoning-to-rationale mining deferred; citation-linking is the verifiable slice | Accepted |
+| [013](ADR-013-auth-posture-fail-closed-local-first.md) | Auth posture: loopback trusted, non-loopback fails closed (supersedes H2 "auth-on everywhere") | Accepted |
 
 ## Conventions
 
