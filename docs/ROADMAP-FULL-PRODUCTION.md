@@ -3,7 +3,7 @@
 **Goal:** a production-ready, self-hosted, MIT-licensed codebase intelligence
 tool — not a demo and not an MVP.
 
-**Last verified against the code:** 2026-07-19. Every box below was checked by
+**Last verified against the code:** 2026-07-20. Every box below was checked by
 running the thing or reading the file that implements it, not from memory. If
 you find a claim here that the code does not support, that is a bug in this
 document and worth an issue.
@@ -51,6 +51,23 @@ convention: an attribution's shares must account for the whole file with
 `unattributed` as a first-class share, and a consequence must declare whether
 it claims correlation or causation.
 
+**Fusion — the moat.** The data model above, now driven end to end:
+- [x] Ingest local agent session logs and correlate each session to the commits
+      it produced (`git log` NUL-delimited, no shell escaping surprises)
+- [x] Per-file AI/human/unattributed line-share via `git blame` × session→commit,
+      with an over-claim guard: shares sum to 100, blame never asserts a human
+      share, a sub-noise signal reports "none" rather than a fabricated number
+- [x] Decision provenance from ADRs and commits, the "why" left null when it
+      cannot be recovered, related decisions linked
+- [x] The consequence loop — what measurably changed after a decision, reported
+      as correlation unless causation is justified
+- [x] Four surfaces over the same audited layers: `mri fusion` (CLI),
+      `GET /api/projects/{id}/fusion` (HTTP), `mri eval` (validate), and an
+      **agent-native MCP server** (`mri mcp`, optional `[mcp]` extra) so a coding
+      agent can ask who authored a file and what decided it, mid-task
+- [x] Evaluation harness — a synthetic labelled corpus with known ground truth;
+      calibration error 0.0 and the over-claim guard run as a hard gate
+
 **Documentation**
 - [x] [INSTALL.md](INSTALL.md), [CONFIG.md](CONFIG.md), [API.md](API.md),
       [INTEGRATIONS.md](INTEGRATIONS.md), [DASHBOARD.md](DASHBOARD.md)
@@ -61,23 +78,21 @@ it claims correlation or causation.
 
 ## In progress
 
-**AI-authorship attribution.** Reading local agent session logs to decompose
-per-file risk into AI-authored, human-authored, and — honestly labelled —
-unattributed shares. The data model is in place; the ingest is not yet.
+**Base-risk composition.** Folding the fusion signals (AI-share, decision
+density, consequence volatility) back into the analyzer layer's per-file risk
+score, so the headline number reflects provenance and not only static and
+git-history metrics. The signals are computed and surfaced; the weighted
+recomposition into the base score is the remaining step.
 
 ---
 
 ## Planned
 
-- **Decision provenance.** Link commits, ADRs, and issues into a queryable
-  why-graph, with the "why" left absent when it cannot be recovered rather
-  than invented.
-- **The consequence loop.** Measure what actually changed after a decision, and
-  report it as correlation unless causation can be justified.
-- **Agent-native surface (MCP).** Let coding agents query risk, history, and
-  decisions live.
-- **Evaluation harness.** A labelled corpus and metrics, so the accuracy claims
-  in this README are numbers rather than adjectives.
+- **Session-reasoning mining.** Recover the *why* an agent made a change from
+  the reasoning in its session log — off by default, since logs can hold
+  secrets, and gated behind explicit content retention.
+- **Third-party log formats.** Ingest Cursor and aider session logs once a
+  verified real-world sample of each format is in hand ([ADR-009](adr/ADR-009-cursor-aider-ingest-deferred.md)).
 
 ---
 
