@@ -99,6 +99,50 @@ def test_a_project_with_no_scored_files_returns_empty(client: TestClient, db_pat
     assert r.json()["files"] == [], "no hotspots is an honest empty list, not an error"
 
 
+def test_the_endpoint_is_project_scoped(client: TestClient, db_path: Path):
+    """Two projects share a file path with different AI shares; each project's
+    endpoint must return only its own — the cross-project isolation the fusion
+    layers enforce, verified at the HTTP boundary."""
+    conn = connect_sync(db_path)
+    try:
+        ids = {}
+        for name, ai in (("A", 90), ("B", 10)):
+            p = conn.execute(
+                "INSERT INTO projects (path, name, default_branch) VALUES (?, ?, 'HEAD')",
+                (f"/{name}", name),
+            ).lastrowid
+            s = conn.execute(
+                "INSERT INTO scans (project_id, scan_uuid, status) VALUES (?, ?, 'completed')",
+                (p, f"u{p}"),
+            ).lastrowid
+            r = conn.execute(
+                "INSERT INTO analyzer_runs (scan_id, analyzer_name, status, score_value, score_label)"
+                " VALUES (?, 'git_history', 'completed', 50, 'g')",
+                (s,),
+            ).lastrowid
+            conn.execute(
+                "INSERT INTO findings (run_id, analyzer_name, severity, category, title, target_path, score)"
+                " VALUES (?, 'git_history', 'high', 'hotspot', 'x', 'README.md', 80)",
+                (r,),
+            )
+            conn.execute(
+                "INSERT INTO authorship_shares (project_id, file_path, share_ai, share_human,"
+                " share_unattributed, method, confidence)"
+                " VALUES (?, 'README.md', ?, 0, ?, 'blame_session_commit', 0.9)",
+                (p, ai, 100 - ai),
+            )
+            ids[name] = int(p)
+        conn.commit()
+    finally:
+        conn.close()
+
+    prose_a = client.get(f"/api/projects/{ids['A']}/fusion").json()["files"][0]["prose"]
+    prose_b = client.get(f"/api/projects/{ids['B']}/fusion").json()["files"][0]["prose"]
+    assert "90% of its current lines" in prose_a
+    assert "10% of its current lines" not in prose_a, "project B's share must not leak into A"
+    assert "10% of its current lines" in prose_b
+
+
 def test_top_is_bounded(client: TestClient, db_path: Path):
     pid = _seed_project_with_fusion(db_path)
     assert client.get(f"/api/projects/{pid}/fusion?top=0").status_code == 422
