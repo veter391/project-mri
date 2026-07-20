@@ -187,6 +187,31 @@ async def test_only_no_change_consequences_omit_the_causation_caveat(db: Path):
     assert "correlation, not causation" not in exp.prose
 
 
+async def test_weighted_risk_factor_is_shown_and_never_exceeds_base(db: Path):
+    """When there is a risk to weight and write evidence to weight it by, the
+    explanation states how much of that risk sits under agent-modified code —
+    bounded by the base risk and labelled correlation, not blame (6.1)."""
+    async with get_connection(db) as conn:
+        pid = await _project(conn)
+        await _ai_touch(conn, pid, "src/a.py")  # write touch at confidence 0.9
+        exp = await explain_file(conn, "src/a.py", project_id=pid, base_risk=70.0)
+    wr = next((f for f in exp.factors if f.name == "weighted_risk"), None)
+    assert wr is not None, "write evidence + base risk should yield a weighted-risk factor"
+    assert wr.value["weighted_risk"] == 63.0, "70 * 0.9"
+    assert wr.value["weighted_risk"] <= wr.value["base_risk"], "weighting never amplifies"
+    assert "correlation, not blame" in exp.prose
+
+
+async def test_weighted_risk_is_absent_without_agent_evidence(db: Path):
+    """A risky file nobody has evidence an agent touched carries no weighted-risk
+    clause — weighting to zero and then claiming it would be noise, not a fact."""
+    async with get_connection(db) as conn:
+        pid = await _project(conn)
+        exp = await explain_file(conn, "src/human.py", project_id=pid, base_risk=90.0)
+    assert [f.name for f in exp.factors] == ["risk"], "only the base risk, no weighted-risk factor"
+    assert "agent-modified code" not in exp.prose
+
+
 async def test_a_control_char_in_a_file_path_is_stripped_from_output(db: Path):
     """A filename can carry a terminal escape on a POSIX host; the prose is
     printed straight to a terminal, so the shown path is cleaned."""

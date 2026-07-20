@@ -22,6 +22,7 @@ from typing import Any
 
 import aiosqlite
 
+from mri.fusion.authorship import weight_hotspots
 from mri.fusion.correlation import CorrelationResult, correlate_touches_to_commits
 from mri.fusion.decisions import ingest_adrs, ingest_commits, link_related_decisions
 from mri.fusion.explain import FileExplanation, explain_file
@@ -107,9 +108,16 @@ async def run_fusion(
         report.authored_files = await persist_file_authorship(
             conn, shares, project_id=project_id
         )
-        for path, base_risk in hotspots.items():
+        # Explain the hotspots ordered by the risk that sits under agent-modified
+        # code, not by raw base risk: the fusion view is about agent provenance,
+        # so the file whose risk is most agent-attributable is the one to surface
+        # first. Files with no such evidence are kept, ordered last (weighted to
+        # zero), never dropped — the selection was already made upstream.
+        for wr in await weight_hotspots(conn, hotspots, project_id=project_id):
             report.explanations.append(
-                await explain_file(conn, path, project_id=project_id, base_risk=base_risk)
+                await explain_file(
+                    conn, wr.file_path, project_id=project_id, base_risk=wr.base_risk
+                )
             )
 
     return report

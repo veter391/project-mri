@@ -67,6 +67,12 @@ it claims correlation or causation.
       agent can ask who authored a file and what decided it, mid-task
 - [x] Evaluation harness — a synthetic labelled corpus with known ground truth;
       calibration error 0.0 and the over-claim guard run as a hard gate
+- [x] Authorship-weighted risk — the portion of a file's existing risk that sits
+      under agent-modified code, bounded ≤ the base risk and labelled
+      correlation, not blame; the fusion view leads with the most
+      agent-attributable file. Provenance is *not* folded into the risk score
+      itself ([ADR-011](adr/ADR-011-base-risk-composition.md) explains why that
+      would be an over-claim)
 
 **Documentation**
 - [x] [INSTALL.md](INSTALL.md), [CONFIG.md](CONFIG.md), [API.md](API.md),
@@ -78,11 +84,8 @@ it claims correlation or causation.
 
 ## In progress
 
-**Base-risk composition.** Folding the fusion signals (AI-share, decision
-density, consequence volatility) back into the analyzer layer's per-file risk
-score, so the headline number reflects provenance and not only static and
-git-history metrics. The signals are computed and surfaced; the weighted
-recomposition into the base score is the remaining step.
+**Nothing mid-flight.** The fusion moat is complete end to end. The next items
+are in "Planned" below, each gated on a real input rather than started early.
 
 ---
 

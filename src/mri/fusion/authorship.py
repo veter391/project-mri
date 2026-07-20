@@ -32,12 +32,29 @@ __all__ = [
     "WeightedRisk",
     "authorship_evidence_for",
     "weight_hotspots",
+    "weighted_risk_of",
 ]
 
 #: SQLite caps a statement at 32,766 bound variables (SQLITE_MAX_VARIABLE_NUMBER
 #: since 3.32). One below, so a query with a single extra bound value would
 #: still fit.
 _SQL_VARIABLE_LIMIT = 32_000
+
+
+def weighted_risk_of(base_risk: float, evidence_strength: float) -> float:
+    """The portion of `base_risk` that sits under agent-modified code: the risk a
+    scan already computed, scaled by how strong the evidence is that an agent
+    modified the file (0..1). Never exceeds `base_risk` — authorship evidence
+    marks where a file's risk sits, it does not amplify it. Correlation, not
+    blame: an agent modified a risky file, which is not the same as having caused
+    the risk. The single source of this formula, shared by the batch
+    `weight_hotspots` and the per-file explanation.
+    """
+    if base_risk < 0:
+        # A negative risk is a caller bug and silently breaks the "weighted never
+        # exceeds base" guarantee (round(-50 * 0.0, 2) is -0.0, which is > -50).
+        raise ValueError(f"base risk must be non-negative; got {base_risk}")
+    return round(base_risk * evidence_strength, 2)
 
 
 def _chunks(items: list[str], size: int) -> list[list[str]]:
@@ -167,10 +184,9 @@ async def weight_hotspots(
 
     negative = [p for p, r in hotspots.items() if r < 0]
     if negative:
-        # Risk scores are 0..100 by construction. A negative one is a caller
-        # bug, and it silently breaks the "weighted never exceeds base"
-        # guarantee (round(-50 * 0.0, 2) is -0.0, which is > -50). Fail loudly
-        # rather than emit a number that violates the module's own contract.
+        # Risk scores are 0..100 by construction. A negative one is a caller bug;
+        # fail loudly with the offending path (weighted_risk_of also guards, but
+        # without the path context this batch call can give).
         raise ValueError(f"base risk must be non-negative; got {hotspots[negative[0]]} for {negative[0]}")
 
     evidence = await authorship_evidence_for(conn, list(hotspots), project_id=project_id)
@@ -190,7 +206,7 @@ async def weight_hotspots(
                 file_path=path,
                 base_risk=base_risk,
                 evidence=ev,
-                weighted_risk=round(base_risk * ev.evidence_strength, 2),
+                weighted_risk=weighted_risk_of(base_risk, ev.evidence_strength),
             )
         )
     results.sort(key=lambda r: (r.weighted_risk, r.base_risk), reverse=True)

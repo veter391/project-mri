@@ -104,6 +104,47 @@ async def test_the_whole_loop_runs_and_explains_from_one_call(db: Path, tmp_path
     assert "1 decision(s) touch it" in prose or "decision(s) touch it" in prose
 
 
+async def test_explanations_are_ordered_by_agent_attributable_risk(db: Path, tmp_path: Path):
+    """The fusion view leads with the file whose risk most sits under agent-
+    modified code, not the raw-riskiest: an agent-written file at base risk 60
+    outranks an untouched one at base risk 95 (6.1). Neither is dropped."""
+    import git
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    _git(repo, "config", "user.email", "t@t")
+    _git(repo, "config", "user.name", "t")
+    (repo / "touched.py").write_text("x = 1\n", encoding="utf-8")
+    (repo / "untouched.py").write_text("y = 2\n", encoding="utf-8")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "add both")
+
+    home = tmp_path / "home"
+    proj = home / ".claude" / "projects" / "slug"
+    proj.mkdir(parents=True)
+    cwd = str(repo)
+    (proj / "sess-p.jsonl").write_text("\n".join(json.dumps(r) for r in [
+        _turn(0, "assistant", cwd, [_use("Write", str(repo / "touched.py"), "u1")]),
+        _turn(1, "user", cwd, [_result("u1")]),
+    ]) + "\n", encoding="utf-8")
+
+    async with get_connection(db) as conn:
+        pid = int((await conn.execute(
+            "INSERT INTO projects (name, path) VALUES ('p', ?)", (cwd,)
+        )).lastrowid)
+        await conn.commit()
+        report = await run_fusion(
+            conn, git.Repo(repo), repo, project_id=pid,
+            hotspots={"untouched.py": 95.0, "touched.py": 60.0}, home=home,
+        )
+
+    order = [e.file_path for e in report.explanations]
+    assert order == ["touched.py", "untouched.py"], (
+        "agent-attributable risk leads, but the higher-base-risk file is still present"
+    )
+
+
 async def test_no_sessions_still_runs_cleanly(db: Path, tmp_path: Path):
     """A repo no agent ever touched: the loop still ingests commits and returns,
     with honest zeros, not an error."""

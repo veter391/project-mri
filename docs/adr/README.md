@@ -15,6 +15,7 @@ decision, and what it costs — including decisions that were later superseded.
 | [008](ADR-008-authorship-line-shares-deferred.md) | Authorship line-shares: deferred, then resolved via 5.2 | Resolved |
 | [009](ADR-009-cursor-aider-ingest-deferred.md) | Cursor/aider ingest deferred until real logs exist | Accepted |
 | [010](ADR-010-git-notes-provenance-deferred.md) | git-notes/Agent Trace deferred; commit trailers are the verifiable slice | Accepted |
+| [011](ADR-011-base-risk-composition.md) | Provenance is not folded into risk; authorship-weighted risk is a bounded triage signal | Accepted |
 
 ## Conventions
 

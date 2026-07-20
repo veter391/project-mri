@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 import aiosqlite
 
 from mri.db import fusion_repository as repo
-from mri.fusion.authorship import authorship_evidence_for
+from mri.fusion.authorship import authorship_evidence_for, weighted_risk_of
 from mri.utils import clean_text
 
 __all__ = ["Factor", "FileExplanation", "explain_file"]
@@ -107,6 +107,20 @@ async def explain_file(
             "a line-share has not been computed.",
             {"strength": evidence.evidence_strength},
         ))
+
+    # The portion of the file's existing risk that sits under agent-modified code:
+    # base risk scaled by evidence strength, never above it (ADR-008's complementary
+    # signal). Only when there is a risk to weight and write evidence to weight it
+    # by, and only if it rounds to a non-zero share — correlation, not blame.
+    if base_risk is not None and evidence and evidence.has_write_evidence:
+        weighted = weighted_risk_of(base_risk, evidence.evidence_strength)
+        if round(weighted) > 0:
+            factors.append(Factor(
+                "weighted_risk",
+                f"about {round(weighted)} of that risk sits under agent-modified code "
+                "— correlation, not blame.",
+                {"weighted_risk": weighted, "base_risk": round(base_risk, 2)},
+            ))
 
     if evidence and evidence.distinct_ai_sessions:
         s = evidence.distinct_ai_sessions
