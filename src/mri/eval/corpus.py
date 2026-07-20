@@ -62,9 +62,17 @@ def build_calibration_case(base: Path) -> LabeledCase:
     * ``mixed.py`` — its current lines split across an agent commit and a later
       human commit, so its AI share is a known fraction.
 
-    Plus an ADR the agent commit references, a confounded consequence window, and
-    an inconclusive (sub-noise) case — so the eval can score correlation,
-    calibration, and the consequence false-positive rate together.
+    Plus an ADR the agent commit references, so the eval can score authorship
+    calibration and session->commit correlation recall against known ground
+    truth.
+
+    Scope, stated honestly: this case does NOT yet build consequence data
+    (scans, analyzer runs, or metric-delta windows), so it exercises the
+    authorship and correlation metrics but not a consequence false-positive
+    rate. Building a confounded window and an inconclusive (sub-noise) case —
+    and the FP-rate metric that would score them — is the open Phase 10.1/10.2
+    work; until then the runner reports no consequence-FP figure rather than a
+    fabricated one.
     """
     import git
 
