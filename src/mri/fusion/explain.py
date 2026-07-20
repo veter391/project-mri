@@ -79,10 +79,18 @@ async def explain_file(
 
     if shares:
         share = shares[0]
+        # State the human share truthfully: some attribution methods can produce
+        # one. The blame-derived method never does, but the sentence must match
+        # the value it carries, not assume the method.
+        human = (
+            f"{round(share.share_human)}% human"
+            if share.share_human > 0
+            else "no human share claimed"
+        )
         factors.append(Factor(
             "ai_authorship",
             f"{round(share.share_ai)}% of its current lines are AI-authored "
-            f"({round(share.share_unattributed)}% unattributed, no human share claimed), "
+            f"({round(share.share_unattributed)}% unattributed, {human}), "
             f"at confidence {share.confidence}.",
             {"ai": share.share_ai, "unattributed": share.share_unattributed,
              "human": share.share_human, "confidence": share.confidence},
@@ -114,24 +122,31 @@ async def explain_file(
             [d.summary for d in decisions],
         ))
 
-        # Consequences of those decisions, always labelled correlation.
+        # Consequences of those decisions. Any real move is labelled correlation;
+        # the caveat is only appended when there is a claimed correlation to
+        # caveat — "no discernible change — correlation, not causation" would be
+        # self-contradictory.
         moves: list[str] = []
         conseq_values: list[dict] = []
+        any_correlation = False
         for d in decisions:
             if d.id is None:
                 continue
             for c in await repo.consequences_for_decision(conn, d.id, project_id=project_id):
                 if c.delta is None:
                     continue
-                claim = "no discernible change" if c.causal_claim == "none" else (
-                    f"{c.metric} {c.delta:+g} ({c.causal_claim})"
-                )
+                if c.causal_claim == "none":
+                    claim = "no discernible change"
+                else:
+                    claim = f"{c.metric} {c.delta:+g} ({c.causal_claim})"
+                    any_correlation = True
                 moves.append(claim)
                 conseq_values.append({"metric": c.metric, "delta": c.delta, "claim": c.causal_claim})
         if moves:
+            caveat = " — correlation, not causation." if any_correlation else "."
             factors.append(Factor(
                 "consequences",
-                "Since then: " + ", ".join(moves) + " — correlation, not causation.",
+                "Since then: " + ", ".join(moves) + caveat,
                 conseq_values,
             ))
 

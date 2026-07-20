@@ -56,6 +56,23 @@ COMMIT_SUBJECT_ONLY_CONFIDENCE = 0.3
 MAX_ADR_FILES = 2_000
 MAX_ADR_BYTES = 2 * 1024 * 1024
 
+#: Commit subjects and ADR titles come from a repository that may be a hostile
+#: clone. They are text, not markup or control codes, so control characters,
+#: ANSI escapes and Unicode bidi overrides are stripped at ingest — that
+#: protects every consumer (terminal, report, JSON) at once and loses no real
+#: information. HTML-escaping is still the web surface's job at its render
+#: boundary; this is the layer below that, keeping the stored text plain.
+_CONTROL = re.compile(
+    r"\x1b\[[0-9;?]*[ -/]*[@-~]"   # ANSI CSI escape sequences
+    r"|[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]"  # C0 controls except tab/newline, and DEL
+    r"|[‪-‮⁦-⁩]"  # bidi embedding/override controls
+)
+
+
+def _clean(text: str) -> str:
+    return _CONTROL.sub("", text)
+
+
 _ADR_TITLE = re.compile(r"^#\s+(.*\S)\s*$", re.MULTILINE)
 #: Tolerant of the label's real forms: `- **Status:** Accepted`,
 #: `**Status:** Accepted · date`, `> Status: **accepted**.`
@@ -111,8 +128,8 @@ def parse_adr(text: str) -> ParsedAdr | None:
     header = text[: header_end.start()] if header_end else text
     status_match = _ADR_STATUS.search(header)
     return ParsedAdr(
-        summary=summary,
-        rationale=body or None,
+        summary=_clean(summary),
+        rationale=_clean(body) or None,
         status=status_match.group(1).strip() if status_match else None,
         decided_at=_parse_date(header),
     )
@@ -199,8 +216,8 @@ def _read_and_parse_adrs(adr_dir: Path) -> list[tuple[str, ParsedAdr]] | None:
 def _commit_decision(commit: Any, project_id: int | None = None) -> Decision:
     message = str(commit.message)
     parts = message.split("\n", 1)
-    summary = parts[0].strip()
-    body = parts[1].strip() if len(parts) > 1 else ""
+    summary = _clean(parts[0].strip())
+    body = _clean(parts[1].strip()) if len(parts) > 1 else ""
     return Decision(
         summary=summary or "(no subject)",
         # No body means no recoverable why. It stays absent — the subject is the
@@ -251,26 +268,57 @@ async def ingest_commits(
 
 async def _link_commit_files(
     conn: aiosqlite.Connection, git_repo: Any, branch: str,
-    project_id: int | None, shas: set[str | None],
+    project_id: int | None, shas: set[str],
 ) -> None:
     """Link each commit decision to the files that commit changed, so a per-file
-    view can reach the decisions behind it. Idempotent — re-linking is ignored."""
+    view can reach the decisions behind it. Idempotent — re-linking is ignored.
+
+    Scoped to this call's commits: only the decisions whose sha was collected now
+    are linked, so a re-ingest does not re-scan and re-link every decision ever
+    stored for the project.
+
+    Merge commits get no file link. `git log --name-only` reports no files for a
+    merge, so a merge decision is recorded but not reachable per-file — which is
+    the honest reading: a merge combines existing work, it does not author the
+    lines, and the commits it merges carry their own links.
+    """
     from mri.fusion.correlation import file_commit_history
+
+    wanted = {s for s in shas if s}
+    if not wanted:
+        return
 
     history = await asyncio.to_thread(file_commit_history, git_repo, branch=branch)
     files_by_sha: dict[str, list[str]] = {}
     for path, commits in history.items():
         for _, sha in commits:
-            files_by_sha.setdefault(sha, []).append(path)
+            if sha in wanted:
+                files_by_sha.setdefault(sha, []).append(path)
 
-    cursor = await conn.execute(
-        "SELECT id, commit_sha FROM decisions"
-        " WHERE source = 'commit' AND commit_sha IS NOT NULL AND project_id IS ?",
-        (project_id,),
-    )
-    for decision_id, sha in await cursor.fetchall():
-        if sha in shas or shas == {None}:
-            await repo.link_decision_files(conn, int(decision_id), project_id, files_by_sha.get(sha, []))
+    for sha, decision_id in (await _decision_ids_for_shas(conn, project_id, wanted)).items():
+        await repo.link_decision_files(conn, decision_id, project_id, files_by_sha.get(sha, []))
+
+
+async def _decision_ids_for_shas(
+    conn: aiosqlite.Connection, project_id: int | None, shas: set[str]
+) -> dict[str, int]:
+    """Map commit sha -> decision id for the commits of this run that are not yet
+    linked. Excluding already-linked decisions makes a no-op re-ingest do no
+    linking work at all, rather than re-issuing an idempotent write per commit."""
+    out: dict[str, int] = {}
+    sha_list = list(shas)
+    for start in range(0, len(sha_list), 500):
+        batch = sha_list[start:start + 500]
+        placeholders = ",".join("?" * len(batch))
+        cursor = await conn.execute(
+            "SELECT commit_sha, id FROM decisions"  # noqa: S608 - placeholders only, values bound
+            " WHERE source = 'commit' AND project_id IS ?"
+            f" AND commit_sha IN ({placeholders})"
+            " AND id NOT IN (SELECT decision_id FROM decision_files)",
+            (project_id, *batch),
+        )
+        out.update({str(sha): int(did) for sha, did in await cursor.fetchall()})
+    return out
 
 
 def _collect_commits(

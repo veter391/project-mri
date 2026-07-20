@@ -414,3 +414,79 @@ async def test_ingest_commits_links_each_commits_changed_files(db: Path):
         await ingest_commits(conn, git.Repo(d), project_id=pid)
         decisions = await repo.decisions_affecting_file(conn, "a.py", project_id=pid)
     assert [x.summary for x in decisions] == ["add a.py"], "the commit that changed a.py reaches it"
+
+
+async def test_each_commit_links_only_its_own_files(db: Path):
+    """Multi-commit: a sha->files inversion bug (last commit's files on every
+    decision, or the wrong commit's files) would be caught here."""
+    import subprocess
+    import tempfile
+
+    import git
+
+    from mri.fusion import ingest_commits
+
+    d = Path(tempfile.mkdtemp())
+
+    def gitc(*a):
+        subprocess.run(["git", *a], cwd=d, capture_output=True)
+
+    gitc("init", "-q")
+    gitc("config", "user.email", "t@t")
+    gitc("config", "user.name", "t")
+    (d / "a.py").write_text("a\n", encoding="utf-8")
+    gitc("add", "-A")
+    gitc("commit", "-qm", "add a")
+    (d / "b.py").write_text("b\n", encoding="utf-8")
+    gitc("add", "-A")
+    gitc("commit", "-qm", "add b")
+
+    async with get_connection(db) as conn:
+        pid = int((await conn.execute("INSERT INTO projects (name, path) VALUES ('p', ?)", (str(d),))).lastrowid)
+        await conn.commit()
+        await ingest_commits(conn, git.Repo(d), project_id=pid)
+        by_a = {x.summary for x in await repo.decisions_affecting_file(conn, "a.py", project_id=pid)}
+        by_b = {x.summary for x in await repo.decisions_affecting_file(conn, "b.py", project_id=pid)}
+    assert by_a == {"add a"}, "a.py links only to the commit that added it"
+    assert by_b == {"add b"}, "b.py links only to the commit that added it"
+
+
+async def test_reingest_does_not_relink_everything(db: Path):
+    """The linkage is scoped to this call's commits; a no-op re-ingest must not
+    re-link every decision ever stored (the audit measured that redundant cost)."""
+    import subprocess
+    import tempfile
+    from unittest.mock import patch
+
+    import git
+
+    import mri.db.fusion_repository as frepo
+    from mri.fusion import ingest_commits
+
+    d = Path(tempfile.mkdtemp())
+
+    def gitc(*a):
+        subprocess.run(["git", *a], cwd=d, capture_output=True)
+
+    gitc("init", "-q")
+    gitc("config", "user.email", "t@t")
+    gitc("config", "user.name", "t")
+    (d / "a.py").write_text("a\n", encoding="utf-8")
+    gitc("add", "-A")
+    gitc("commit", "-qm", "add a")
+
+    async with get_connection(db) as conn:
+        pid = int((await conn.execute("INSERT INTO projects (name, path) VALUES ('p', ?)", (str(d),))).lastrowid)
+        await conn.commit()
+        await ingest_commits(conn, git.Repo(d), project_id=pid)  # first: links a.py
+
+        calls = {"n": 0}
+        real = frepo.link_decision_files
+
+        async def counting(*args, **kwargs):
+            calls["n"] += 1
+            return await real(*args, **kwargs)
+
+        with patch.object(frepo, "link_decision_files", counting):
+            await ingest_commits(conn, git.Repo(d), project_id=pid)  # re-ingest, nothing new
+    assert calls["n"] == 0, "a re-ingest that inserted no new commit links nothing"

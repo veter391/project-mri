@@ -145,3 +145,43 @@ async def test_explanation_is_project_scoped(db: Path):
         ))
         exp_a = await explain_file(conn, "README.md", project_id=a)
     assert exp_a.factors == [], "project A has no evidence for this file"
+
+
+# ---------------------------------------------------------------------------
+# What the 6.3/7.1 audit found
+# ---------------------------------------------------------------------------
+
+
+async def test_a_nonzero_human_share_is_stated_truthfully(db: Path):
+    """The sentence must match the value it carries: a method that produced a
+    human share must not be described as 'no human share claimed'."""
+    async with get_connection(db) as conn:
+        pid = await _project(conn)
+        await _ai_touch(conn, pid, "src/a.py")
+        await repo.insert_authorship_share(conn, AuthorshipShare(
+            project_id=pid, file_path="src/a.py", share_ai=40, share_human=35,
+            share_unattributed=25, method="session_overlap", confidence=0.6,
+        ))
+        exp = await explain_file(conn, "src/a.py", project_id=pid)
+    assert "35% human" in exp.prose
+    assert "no human share claimed" not in exp.prose
+
+
+async def test_only_no_change_consequences_omit_the_causation_caveat(db: Path):
+    """"no discernible change — correlation, not causation" is self-contradictory.
+    The caveat is only appended when there is a real correlation to caveat."""
+    async with get_connection(db) as conn:
+        pid = await _project(conn)
+        decision = await repo.insert_decision(conn, Decision(
+            summary="tidy", source="commit", source_ref="s", project_id=pid, file_path="src/a.py",
+        ))
+        await repo.insert_consequence(conn, Consequence(
+            decision_id=decision.id, metric="complexity", file_path="src/a.py",
+            window_start=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            window_end=datetime(2026, 2, 1, tzinfo=timezone.utc),
+            baseline_value=30.0, observed_value=30.1, delta=0.1,
+            causal_claim="none", confidence=0.0,
+        ))
+        exp = await explain_file(conn, "src/a.py", project_id=pid)
+    assert "no discernible change" in exp.prose
+    assert "correlation, not causation" not in exp.prose
