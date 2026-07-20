@@ -26,19 +26,23 @@ _MARK = "\x01"
 
 
 class _FakeGit:
-    """Emits the exact `git log --pretty=format:\\x01%H\\x1f%aI --name-only`
-    shape the correlator parses, from a list of (sha, iso, [files])."""
+    """Emits the exact `git log -z --pretty=format:\\x01%H\\x1f%aI --name-only`
+    shape the correlator parses: raw (unquoted) paths, NUL-separated fields.
+    Input is chronological (oldest first); git log is newest-first, so it is
+    reversed here to match."""
 
     def __init__(self, commits: list[tuple[str, str, list[str]]]):
-        # git log is newest-first; the correlator sorts ascending itself.
         self._commits = list(reversed(commits))
 
     def log(self, *args: str) -> str:  # noqa: ARG002 - signature mirrors GitPython
-        blocks = []
+        if args and args[-1].startswith("-"):
+            raise ValueError(f"invalid revision {args[-1]!r}")  # mirror _validate_branch
+        fields: list[str] = []
         for sha, iso, files in self._commits:
-            blocks.append(f"{_MARK}{sha}{_SEP}{iso}")
-            blocks.extend(files)
-        return "\n".join(blocks)
+            first = files[0] if files else ""
+            fields.append(f"{_MARK}{sha}{_SEP}{iso}\n{first}")
+            fields.extend(files[1:])
+        return "\x00".join(fields) + "\x00"
 
 
 class _FakeRepo:
@@ -214,3 +218,57 @@ async def test_a_commit_gains_all_earlier_touches_of_its_files(db: Path):
         touches = await repo.touches_for_file(conn, "src/a.py", project_id=pid)
     assert res.linked == 2
     assert {t.commit_sha for t in touches} == {"c"}
+
+
+# ---------------------------------------------------------------------------
+# What the 5.2 audits found
+# ---------------------------------------------------------------------------
+
+
+async def test_a_non_ascii_filename_correlates(db: Path):
+    """git's default core.quotepath escaped non-ASCII names, so a touch on
+    'café.py' never matched the escaped log key and fell uncommitted forever.
+    The -z parser reads the raw path, so it links."""
+    async with get_connection(db) as conn:
+        pid = await _project(conn)
+        sid = await _session(conn, pid)
+        await _touch(conn, sid, pid, "src/café.py", _dt(3))
+        git = _FakeRepo([("c", "2026-05-04T12:00:00+00:00", ["src/café.py"])])
+        res = await correlate_touches_to_commits(conn, git, project_id=pid)
+        touches = await repo.touches_for_file(conn, "src/café.py", project_id=pid)
+    assert res.linked == 1
+    assert touches[0].commit_sha == "c"
+
+
+async def test_a_file_with_multiple_files_per_commit_parses(db: Path):
+    """The -z parser must split several files in one commit correctly."""
+    repo_obj = _FakeRepo([("c", "2026-05-01T12:00:00+00:00", ["a.py", "b.py", "dir/c.py"])])
+    hist = file_commit_history(repo_obj)
+    assert set(hist) == {"a.py", "b.py", "dir/c.py"}
+
+
+async def test_equal_timestamp_commits_pick_the_earliest_committed(db: Path):
+    """Two commits change the file at the identical author second. The link must
+    be the earlier-committed one — the commit that first materialised the edit,
+    not a later commit that happens to share the timestamp."""
+    async with get_connection(db) as conn:
+        pid = await _project(conn)
+        sid = await _session(conn, pid)
+        await _touch(conn, sid, pid, "src/a.py", _dt(4))
+        # chronological order: 'earliest' committed before 'later', same author time.
+        git = _FakeRepo([
+            ("earliest", "2026-05-04T12:00:00+00:00", ["src/a.py"]),
+            ("later", "2026-05-04T12:00:00+00:00", ["src/a.py"]),
+        ])
+        await correlate_touches_to_commits(conn, git, project_id=pid)
+        touches = await repo.touches_for_file(conn, "src/a.py", project_id=pid)
+    assert touches[0].commit_sha == "earliest", "the earliest-committed of a tie, not a later one"
+
+
+def test_a_branch_that_looks_like_a_flag_is_refused():
+    """`git log` has no `--` guard for its revision position; a branch value that
+    starts with `-` would be read as an option. Refused before it can be."""
+    from mri.fusion.correlation import file_commit_history
+
+    with pytest.raises(ValueError, match="invalid branch"):
+        file_commit_history(_FakeRepo([]), branch="--output=/tmp/pwn")

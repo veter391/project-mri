@@ -32,7 +32,6 @@ from typing import Any
 import aiosqlite
 
 from mri.db import fusion_repository as repo
-from mri.utils import utc_iso
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +55,15 @@ class CorrelationResult:
     commits: set[str] = field(default_factory=set)
 
 
+def _validate_branch(branch: str) -> str:
+    """A branch is a revision, not an option or a pathspec. Reject a value that
+    could be read as a git flag before it is ever taken from anything but a
+    hardcoded literal — `git log` has no `--` guard for the revision position."""
+    if branch.startswith("-"):
+        raise ValueError(f"invalid branch/revision {branch!r}")
+    return branch
+
+
 def file_commit_history(git_repo: Any, *, branch: str = "HEAD") -> dict[str, list[tuple[datetime, str]]]:
     """Per file, the commits that changed it, ascending by author time.
 
@@ -63,40 +71,65 @@ def file_commit_history(git_repo: Any, *, branch: str = "HEAD") -> dict[str, lis
     into git once for every commit and is the slow path this deliberately avoids.
     Author time (not commit time) is used, because it is when the change was
     written — the moment a touch should line up against.
+
+    `-z` (NUL-terminated) rather than the default line output: git's default
+    `core.quotepath` wraps any non-ASCII, backslash or quote in a filename in
+    C-style escapes ("caf\\303\\251.py"), which would never match the real
+    `file_path` a touch carries — every accented/CJK/emoji filename would fall
+    silently uncommitted. `-z` emits the raw path and sidesteps quoting entirely.
+
+    Ties: two commits changing the same file at the identical author second are
+    ordered earliest-committed first, so the first-at-or-after link picks the
+    commit that actually materialised the edit rather than a later one. git log
+    is newest-first, so the earlier-committed of a tie has the higher stream
+    index — the sort key uses `-index` to bring it first.
     """
     raw = git_repo.git.log(
-        f"--pretty=format:{_MARK}%H{_SEP}%aI", "--name-only", "--no-renames", branch
+        f"--pretty=format:{_MARK}%H{_SEP}%aI", "--name-only", "--no-renames", "-z",
+        _validate_branch(branch),
     )
-    history: dict[str, list[tuple[datetime, str]]] = {}
+    history: dict[str, list[tuple[datetime, int, str]]] = {}
     sha = ""
     when: datetime | None = None
-    for line in raw.splitlines():
-        if line.startswith(_MARK):
-            body = line[len(_MARK):]
+    index = 0
+    # -z separates every field — the commit header (which ends at the newline
+    # before its first file) and each file path — with NUL. A field that carries
+    # the record marker begins a commit and also holds that commit's first file
+    # after the newline; every other non-empty field is a further file.
+    for field_ in raw.split("\x00"):
+        if not field_:
+            continue
+        if field_.startswith(_MARK):
+            header, _, first_file = field_.partition("\n")
+            body = header[len(_MARK):]
             sha, _, iso = body.partition(_SEP)
+            index += 1
             try:
                 when = datetime.fromisoformat(iso)
             except ValueError:  # pragma: no cover - git always emits a valid %aI
                 when = None
-            continue
-        path = line.strip()
+            path = first_file
+        else:
+            path = field_
         if not path or when is None:
             continue
-        history.setdefault(path, []).append((when, sha))
-    # Each file's commits arrive newest-first (git log order); sort ascending so
-    # a touch can bisect to the first commit at or after its time.
-    for commits in history.values():
-        commits.sort(key=lambda c: c[0])
-    return history
+        history.setdefault(path, []).append((when, index, sha))
+
+    # Ascending by author time; for a tie, higher stream index (earlier commit)
+    # first. Drop the index from the returned pairs.
+    out: dict[str, list[tuple[datetime, str]]] = {}
+    for path, commits in history.items():
+        commits.sort(key=lambda c: (c[0], -c[1]))
+        out[path] = [(when_, sha_) for when_, _, sha_ in commits]
+    return out
 
 
 def _first_commit_at_or_after(
-    commits: list[tuple[datetime, str]], moment: datetime
+    times: list[datetime], commits: list[tuple[datetime, str]], moment: datetime
 ) -> str | None:
     """The earliest commit whose author time is >= moment, or None."""
-    times = [c[0] for c in commits]
     idx = bisect_left(times, moment)
-    return commits[idx][1] if idx < len(commits) else None
+    return commits[idx][1] if idx < len(times) else None
 
 
 async def correlate_touches_to_commits(
@@ -110,25 +143,30 @@ async def correlate_touches_to_commits(
     history = await asyncio.to_thread(file_commit_history, git_repo, branch=branch)
     touches = await repo.uncommitted_write_touches(conn, project_id)
 
-    result = CorrelationResult()
+    # Each file's ascending time list is built once, not once per touch on it —
+    # a hotspot file can carry thousands of touches and commits, and reconverting
+    # per touch measured O(touches x commits). Author times from git are already
+    # offset-aware, and a touch's stored time parses to aware UTC, so they compare
+    # directly with no re-normalisation.
+    times_by_file: dict[str, list[datetime]] = {
+        path: [t for t, _ in commits] for path, commits in history.items()
+    }
+
     linked_ids: list[tuple[int, str]] = []
+    uncommitted = 0
+    commits_hit: set[str] = set()
     for touch in touches:
         commits = history.get(touch.file_path)
         if not commits or touch.occurred_at is None:
-            result = CorrelationResult(result.linked, result.uncommitted + 1, result.commits)
+            uncommitted += 1
             continue
-        # occurred_at is stored UTC-canonical; compare on the same footing.
-        moment = datetime.fromisoformat(utc_iso(touch.occurred_at))
-        sha = _first_commit_at_or_after(
-            [(datetime.fromisoformat(utc_iso(t)), s) for t, s in commits], moment
-        )
+        sha = _first_commit_at_or_after(times_by_file[touch.file_path], commits, touch.occurred_at)
         if sha is None:
-            result = CorrelationResult(result.linked, result.uncommitted + 1, result.commits)
+            uncommitted += 1
             continue
         assert touch.id is not None
         linked_ids.append((touch.id, sha))
-        result.commits.add(sha)
-
+        commits_hit.add(sha)
     for touch_id, sha in linked_ids:
         await repo.set_touch_commit(conn, touch_id, sha)
     if linked_ids:
@@ -136,6 +174,6 @@ async def correlate_touches_to_commits(
 
     logger.info(
         "correlated %d touch(es) to %d commit(s) for project %d; %d not yet committed",
-        len(linked_ids), len(result.commits), project_id, result.uncommitted,
+        len(linked_ids), len(commits_hit), project_id, uncommitted,
     )
-    return CorrelationResult(len(linked_ids), result.uncommitted, result.commits)
+    return CorrelationResult(len(linked_ids), uncommitted, commits_hit)

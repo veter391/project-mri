@@ -30,7 +30,9 @@ class _BlameRepo:
 
     def blame(self, rev: str, path: str):  # noqa: ARG002 - mirrors GitPython
         if path not in self._blames:
-            raise ValueError(f"no such path in tree: {path}")
+            import git
+            # The real GitPython raises this for a path absent at HEAD.
+            raise git.GitCommandError(["blame", rev, "--", path], 128)
         return [(_Commit(sha), ["x"] * n) for sha, n in self._blames[path]]
 
 
@@ -56,6 +58,7 @@ async def _ai_touch(conn, pid, sha, file_path="src/a.py", confidence=0.9, kind="
     )
     stored = await repo.insert_session_file_touch(conn, touch)
     await repo.set_touch_commit(conn, stored.id, sha)  # type: ignore[arg-type]
+    await conn.commit()  # set_touch_commit defers the commit to its bulk caller
 
 
 async def test_a_fully_ai_written_file_is_100_percent_ai(db: Path):

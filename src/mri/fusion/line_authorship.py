@@ -71,13 +71,20 @@ def _blame_share(git_repo: Any, file_path: str, ai: _AiCommits) -> AuthorshipSha
     """Blame one file and split its current lines into AI vs unattributed.
 
     None when the file cannot be blamed — it does not exist at HEAD, or is binary.
-    That is an honest absence, not a fabricated all-unattributed row.
+    That is an honest absence. It is logged, so an operator can tell a legitimate
+    omission from a real failure rather than reading every gap as "no AI here":
+    a bad ref or a broken git process is a different thing from a deleted file,
+    and only git-command failures are swallowed — anything else propagates.
     """
+    import git as _git
+
     try:
         blame = git_repo.blame("HEAD", file_path)
-    except Exception:  # noqa: BLE001 - GitPython raises several unrelated types here
+    except _git.GitCommandError as exc:
+        logger.debug("cannot blame %s (absent at HEAD or binary): %s", file_path, exc)
         return None
     if not blame:
+        logger.debug("blame of %s returned nothing; omitting", file_path)
         return None
 
     total = 0
@@ -135,19 +142,37 @@ def _compute_blocking(
 async def persist_file_authorship(
     conn: aiosqlite.Connection, shares: list[AuthorshipShare], *, project_id: int
 ) -> int:
-    """Store computed shares, replacing any previous blame-derived share for the
-    same file so a recompute does not stack stale rows. Only this method's rows
-    are replaced; a share written by another method is left alone.
+    """Store computed shares in one transaction, replacing any previous
+    blame-derived share for the same file so a recompute does not stack stale
+    rows. Only this method's rows are replaced; a share from another method is
+    left alone. One transaction, so a mid-batch failure leaves the previous set
+    whole rather than half-replaced.
     """
-    from mri.db import fusion_repository as repo
+    from mri.db.fusion_repository import _iso
 
-    written = 0
-    for share in shares:
-        await conn.execute(
-            "DELETE FROM authorship_shares"
-            " WHERE project_id = ? AND file_path = ? AND method = ?",
-            (project_id, share.file_path, METHOD),
+    if not shares:
+        return 0
+    try:
+        await conn.execute("BEGIN")
+        for share in shares:
+            await conn.execute(
+                "DELETE FROM authorship_shares"
+                " WHERE project_id = ? AND file_path = ? AND method = ?",
+                (project_id, share.file_path, METHOD),
+            )
+        await conn.executemany(
+            "INSERT INTO authorship_shares"
+            " (project_id, file_path, commit_sha, share_ai, share_human, share_unattributed,"
+            "  method, confidence, computed_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                (project_id, s.file_path, s.commit_sha, s.share_ai, s.share_human,
+                 s.share_unattributed, s.method, s.confidence, _iso(s.computed_at))
+                for s in shares
+            ],
         )
-        await repo.insert_authorship_share(conn, share.model_copy(update={"project_id": project_id}))
-        written += 1
-    return written
+        await conn.commit()
+    except Exception:
+        await conn.rollback()
+        raise
+    return len(shares)
