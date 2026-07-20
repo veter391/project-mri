@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-__all__ = ["LabeledCase", "build_calibration_case"]
+__all__ = ["ConsequenceExpectation", "LabeledCase", "build_calibration_case", "seed_consequence_cases"]
 
 
 @dataclass(slots=True, frozen=True)
@@ -66,13 +66,10 @@ def build_calibration_case(base: Path) -> LabeledCase:
     calibration and session->commit correlation recall against known ground
     truth.
 
-    Scope, stated honestly: this case does NOT yet build consequence data
-    (scans, analyzer runs, or metric-delta windows), so it exercises the
-    authorship and correlation metrics but not a consequence false-positive
-    rate. Building a confounded window and an inconclusive (sub-noise) case —
-    and the FP-rate metric that would score them — is the open Phase 10.1/10.2
-    work; until then the runner reports no consequence-FP figure rather than a
-    fabricated one.
+    The consequence false-positive cases (a sub-noise window that must claim
+    nothing, a clear move that may claim only correlation) are built separately
+    by `seed_consequence_cases`, which the runner scores into the FP rate — so
+    the honesty guard is exercised against generated data, not only unit rows.
     """
     import git
 
@@ -131,3 +128,67 @@ def build_calibration_case(base: Path) -> LabeledCase:
         expected_correlated_touches=2,  # ai_all.py and mixed.py, both before commit 1
         hotspots={"ai_all.py": 80.0, "human_all.py": 70.0, "mixed.py": 75.0},
     )
+
+
+@dataclass(slots=True, frozen=True)
+class ConsequenceExpectation:
+    """A seeded consequence and the strongest claim it is allowed to make."""
+
+    decision: Any  # a stored Decision (carries its id)
+    metric: str
+    #: The ground-truth ceiling: 'none' for a sub-noise move, 'correlation' for a
+    #: real one. The loop may claim this or weaker, never stronger (never causation).
+    expected_claim: str
+
+
+async def seed_consequence_cases(conn: Any, project_id: int) -> list[ConsequenceExpectation]:
+    """Insert two consequence scenarios with known right answers, for the FP rate.
+
+    * **Inconclusive** — a decision followed by a sub-noise metric move (< the
+      noise threshold). Ground truth: it must claim nothing ('none').
+    * **Correlation** — a decision followed by a clear metric move. Ground truth:
+      it may claim 'correlation', never causation.
+
+    Pure DB (scans, analyzer runs, decisions); no git needed. Returns the
+    expectations so the runner can score whether the loop ever over-claims.
+    """
+    from datetime import datetime, timezone
+
+    from mri.db import fusion_repository as repo
+    from mri.models.fusion import Decision
+
+    def _dt(day: int) -> datetime:
+        return datetime(2026, 5, day, tzinfo=timezone.utc)
+
+    async def _scan_score(day: int, metric: str, value: float) -> None:
+        cur = await conn.execute(
+            "INSERT INTO scans (project_id, scan_uuid, status, started_at) VALUES (?, ?, 'completed', ?)",
+            (project_id, f"conseq-{day}-{metric}", _dt(day).isoformat()),
+        )
+        await conn.execute(
+            "INSERT INTO analyzer_runs (scan_id, analyzer_name, status, score_value, score_label)"
+            " VALUES (?, ?, 'completed', ?, ?)",
+            (int(cur.lastrowid), metric, value, metric),
+        )
+
+    # Inconclusive: 50.0 -> 50.4 across the decision is below the noise threshold.
+    await _scan_score(1, "complexity", 50.0)
+    await _scan_score(20, "complexity", 50.4)
+    d_none = await repo.insert_decision(conn, Decision(
+        summary="tidy imports", source="commit", source_ref="noise01",
+        project_id=project_id, file_path="quiet.py", decided_at=_dt(10), confidence=0.6,
+    ))
+
+    # Correlation: 40.0 -> 60.0 is a clear move; it may claim correlation only.
+    await _scan_score(1, "architecture", 40.0)
+    await _scan_score(20, "architecture", 60.0)
+    d_corr = await repo.insert_decision(conn, Decision(
+        summary="split god module", source="commit", source_ref="move01",
+        project_id=project_id, file_path="split.py", decided_at=_dt(10), confidence=0.6,
+    ))
+    await conn.commit()
+
+    return [
+        ConsequenceExpectation(d_none, "complexity", "none"),
+        ConsequenceExpectation(d_corr, "architecture", "correlation"),
+    ]

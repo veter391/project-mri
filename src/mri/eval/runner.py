@@ -21,10 +21,18 @@ import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from mri.eval.corpus import LabeledCase, build_calibration_case
+from mri.eval.corpus import (
+    LabeledCase,
+    build_calibration_case,
+    seed_consequence_cases,
+)
 from mri.eval.guard import Violation, audit_project
 
 __all__ = ["EvalReport", "run_eval"]
+
+#: Ordering of causal claims by strength — a consequence over-claims when the
+#: claim it makes outranks the strongest one its ground truth permits.
+_CLAIM_RANK = {"none": 0, "correlation": 1, "causation": 2}
 
 #: A computed AI share must land within this many points of the known truth.
 #: Blame is exact and correlation is deterministic here, so the real tolerance is
@@ -38,6 +46,9 @@ class EvalReport:
     #: file -> (expected_ai_pct, computed_ai_pct, abs_error)
     calibration: dict[str, tuple[float, float, float]] = field(default_factory=dict)
     correlation_recall: float = 0.0
+    #: Fraction of seeded consequences that claimed more than their ground truth
+    #: allowed (e.g. a sub-noise move claimed as correlation). Must be 0.0.
+    consequence_false_positive_rate: float = 0.0
     violations: list[Violation] = field(default_factory=list)
 
     @property
@@ -46,8 +57,13 @@ class EvalReport:
 
     @property
     def passed(self) -> bool:
-        """The honesty gate: no over-claim, and every share within tolerance."""
-        return not self.violations and self.worst_calibration_error <= CALIBRATION_TOLERANCE
+        """The honesty gate: no over-claim (violations or a consequence
+        false-positive), and every share within tolerance."""
+        return (
+            not self.violations
+            and self.worst_calibration_error <= CALIBRATION_TOLERANCE
+            and self.consequence_false_positive_rate == 0.0
+        )
 
 
 async def run_eval(base: Path | None = None) -> EvalReport:
@@ -93,7 +109,25 @@ async def run_eval(base: Path | None = None) -> EvalReport:
             if case.expected_correlated_touches else 1.0
         )
 
-        # The honesty gate.
+        # Consequence false-positive rate: seed cases whose right answer is known
+        # (a sub-noise move must claim nothing; a clear move may claim only
+        # correlation), measure them, and count any that claim more than allowed.
+        # Persisted, so the honesty guard below audits real consequence rows.
+        from mri.fusion import measure_decision_consequences
+
+        expectations = await seed_consequence_cases(conn, pid)
+        over_claims = 0
+        measured = 0
+        for exp in expectations:
+            for c in await measure_decision_consequences(
+                conn, exp.decision, [exp.metric], project_id=pid, persist=True
+            ):
+                measured += 1
+                if _CLAIM_RANK[c.causal_claim] > _CLAIM_RANK[exp.expected_claim]:
+                    over_claims += 1
+        result.consequence_false_positive_rate = over_claims / measured if measured else 0.0
+
+        # The honesty gate — now over authorship AND the seeded consequences.
         result.violations = await audit_project(conn, pid)
 
     return result

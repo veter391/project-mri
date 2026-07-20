@@ -26,6 +26,7 @@ async def test_calibration_matches_known_ground_truth(tmp_path: Path):
     assert report.calibration["human_all.py"][1] == pytest.approx(0.0, abs=2.0)
     assert report.calibration["mixed.py"][1] == pytest.approx(50.0, abs=2.0)
     assert report.correlation_recall == 1.0
+    assert report.consequence_false_positive_rate == 0.0
     assert report.violations == []
     assert report.passed
 
@@ -91,6 +92,52 @@ async def test_the_guard_catches_full_confidence(tmp_path: Path):
     async with get_connection(db) as conn:
         violations = await audit_project(conn, pid)
     assert "confidence_below_1" in {v.rule for v in violations}
+
+
+async def test_the_seeded_consequence_cases_get_the_right_claims(tmp_path: Path):
+    """Non-vacuous FP rate: the seeded cases actually produce consequences, and
+    each gets the claim its ground truth allows — a sub-noise move claims nothing,
+    a clear move claims correlation (never causation)."""
+    from mri.eval.corpus import seed_consequence_cases
+    from mri.fusion import measure_decision_consequences
+
+    db = tmp_path / "c.db"
+    migrate(db)
+    async with get_connection(db) as conn:
+        pid = int((await conn.execute("INSERT INTO projects (name,path) VALUES ('p','/p')")).lastrowid)
+        await conn.commit()
+        by_metric = {}
+        for exp in await seed_consequence_cases(conn, pid):
+            measured = await measure_decision_consequences(
+                conn, exp.decision, [exp.metric], project_id=pid, persist=False
+            )
+            assert measured, f"the {exp.metric} case must produce a consequence"
+            by_metric[exp.metric] = measured[0].causal_claim
+    assert by_metric["complexity"] == "none", "a sub-noise move must claim nothing"
+    assert by_metric["architecture"] == "correlation", "a clear move claims correlation"
+
+
+async def test_the_fp_rate_would_flag_an_overclaim(tmp_path: Path):
+    """The FP rate is only meaningful if it can be non-zero. The clear-move case
+    genuinely claims correlation; held to a 'none' ceiling that outranks the
+    allowance, which is exactly what the runner counts as a false positive."""
+    from mri.eval.corpus import seed_consequence_cases
+    from mri.eval.runner import _CLAIM_RANK
+    from mri.fusion import measure_decision_consequences
+
+    db = tmp_path / "fp.db"
+    migrate(db)
+    async with get_connection(db) as conn:
+        pid = int((await conn.execute("INSERT INTO projects (name,path) VALUES ('p','/p')")).lastrowid)
+        await conn.commit()
+        corr = next(e for e in await seed_consequence_cases(conn, pid) if e.metric == "architecture")
+        measured = await measure_decision_consequences(
+            conn, corr.decision, [corr.metric], project_id=pid, persist=False
+        )
+    assert measured[0].causal_claim == "correlation"
+    assert _CLAIM_RANK[measured[0].causal_claim] > _CLAIM_RANK["none"], (
+        "a real correlation held to a 'none' ceiling must register as an over-claim"
+    )
 
 
 async def test_a_clean_project_has_no_violations(tmp_path: Path):
