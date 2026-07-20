@@ -14,7 +14,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 try:
-    from tree_sitter_language_pack import get_parser as _get_parser  # type: ignore
+    from tree_sitter_language_pack import get_parser as _get_parser
 
     HAS_TREE_SITTER = True
 except Exception:  # pragma: no cover - exercised only where the wheel is absent
@@ -167,8 +167,8 @@ def resolve_python_import(ctx: Any, importer_rel: str, specifier: str) -> str | 
     prefixes = ("",) if dots else ctx.source_roots()
     for stem in stems:
         for prefix in prefixes:
-            base = f"{prefix}/{stem}" if prefix else stem
-            for candidate in (f"{base}.py", f"{base}/__init__.py"):
+            base_path = f"{prefix}/{stem}" if prefix else stem
+            for candidate in (f"{base_path}.py", f"{base_path}/__init__.py"):
                 if candidate in known:
                     return candidate
     return None

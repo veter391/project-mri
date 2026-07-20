@@ -312,8 +312,8 @@ def parse_log(log: Path, *, repo_root: Path, store_content: bool = False) -> Par
         for part in _content_parts(record):
             if part.get("type") != "tool_use":
                 continue
-            touch_kind = FILE_TOOLS.get(str(part.get("name")))
-            if touch_kind is None:
+            tool_kind = FILE_TOOLS.get(str(part.get("name")))
+            if tool_kind is None:
                 continue
             raw_path = (part.get("input") or {}).get("file_path")
             if not isinstance(raw_path, str):
@@ -332,10 +332,10 @@ def parse_log(log: Path, *, repo_root: Path, store_content: bool = False) -> Par
                         seq=earlier_seq, file_path=earlier_path, touch_kind=earlier_kind,
                         confidence=CONFIDENCE_OUTCOME_UNKNOWN, occurred_at=earlier_time,
                     ))
-                pending[use_id] = (seq, relative, touch_kind, occurred_at)
+                pending[use_id] = (seq, relative, tool_kind, occurred_at)
             else:
                 session.touches.append(ParsedTouch(
-                    seq=seq, file_path=relative, touch_kind=touch_kind,
+                    seq=seq, file_path=relative, touch_kind=tool_kind,
                     confidence=CONFIDENCE_OUTCOME_UNKNOWN, occurred_at=occurred_at,
                 ))
 

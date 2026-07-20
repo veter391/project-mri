@@ -161,7 +161,7 @@ def create_app() -> FastAPI:
     from starlette.exceptions import HTTPException as _HTTPException
 
     try:
-        _dashboard_dir = _pkg_files("mri").joinpath("_frontend", "dashboard")
+        _dashboard_dir = _pkg_files("mri").joinpath("_frontend").joinpath("dashboard")
         _has_dashboard = _dashboard_dir.joinpath("index.html").is_file()
     except (ModuleNotFoundError, FileNotFoundError, NotADirectoryError):
         _has_dashboard = False
@@ -171,7 +171,7 @@ def create_app() -> FastAPI:
             """StaticFiles with SPA fallback: unknown routes serve index.html,
             missing assets (js/css/images) still 404."""
 
-            async def get_response(self, path: str, scope):  # type: ignore[override]
+            async def get_response(self, path: str, scope):
                 try:
                     return await super().get_response(path, scope)
                 except _HTTPException as exc:

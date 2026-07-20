@@ -268,7 +268,7 @@ async def ingest_commits(
         )
     written = await repo.insert_decisions_ignoring_duplicates(conn, decisions)
     await _link_commit_files(
-        conn, git_repo, branch, project_id, {d.commit_sha for d in decisions},
+        conn, git_repo, branch, project_id, {d.commit_sha for d in decisions if d.commit_sha},
         history=history, max_count=max_count,
     )
     return written
@@ -297,12 +297,15 @@ async def _link_commit_files(
     if not wanted:
         return
 
+    resolved_history: dict[str, list[tuple[Any, str]]]
     if history is None:
-        history = await asyncio.to_thread(
+        resolved_history = await asyncio.to_thread(
             file_commit_history, git_repo, branch=branch, max_count=max_count
         )
+    else:
+        resolved_history = history
     files_by_sha: dict[str, list[str]] = {}
-    for path, commits in history.items():
+    for path, commits in resolved_history.items():
         for _, sha in commits:
             if sha in wanted:
                 files_by_sha.setdefault(sha, []).append(path)

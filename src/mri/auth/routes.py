@@ -104,9 +104,9 @@ def require_user(
                 }
     # 2. Try session cookie
     cookie_name = get_config().get("auth", {}).get("session_cookie_name", "mri_session")
-    token = request.cookies.get(cookie_name)
-    if token:
-        claims = verify_token(token)
+    cookie_token = request.cookies.get(cookie_name)
+    if cookie_token:
+        claims = verify_token(cookie_token)
         if claims is not None:
             user = get_user_by_id(int(claims["sub"]))
             if user is not None:

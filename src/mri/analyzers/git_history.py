@@ -61,7 +61,7 @@ class GitHistoryAnalyzer(BaseAnalyzer):
                 except Exception:  # nosem: bandit  # detached HEAD or unborn branch
                     branch = "HEAD"
             # Per-file: total churn (insertions + deletions), commit count, authors
-            file_churn: dict[str, int] = Counter()
+            file_churn: Counter[str] = Counter()
             file_commits: dict[str, int] = Counter()
             file_authors: dict[str, set[str]] = defaultdict(set)
             author_total: Counter[str] = Counter()

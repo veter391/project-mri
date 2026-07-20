@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import random
 from datetime import datetime, timedelta, timezone
+from typing import TypedDict
 
 from mri.models.scan import (
     AnalyzerRun,
@@ -20,6 +21,16 @@ from mri.models.scan import (
     Score,
     Severity,
 )
+
+
+class _HotspotRow(TypedDict, total=False):
+    """A seeded churn hotspot; `composite` is filled in after construction."""
+
+    path: str
+    commits: int
+    churn: int
+    authors: int
+    composite: float
 
 
 # deterministic seeding for demo data; not cryptographic
@@ -42,7 +53,7 @@ def generate_demo_report(slug: str = "my-legacy-app") -> Report:
     # 1. git_history
     commit_count = rng.randint(1800, 5200)
     bus_factor = rng.randint(1, 4)
-    hotspots = [
+    hotspots: list[_HotspotRow] = [
         {"path": f"src/{slug}/core/{rng.choice(['parser','engine','router'])}.py",
          "commits": rng.randint(80, 220),
          "churn": rng.randint(2400, 8200),
@@ -66,7 +77,7 @@ def generate_demo_report(slug: str = "my-legacy-app") -> Report:
             description=f"{h['commits']} commits, ~{h['churn']:,} lines churn, {h['authors']} authors.",
             target_path=h["path"],
             score=min(100.0, h["commits"] * 0.5),
-            data=h,
+            data=dict(h),
         ))
     for p in islands:
         gh_findings.append(Finding(
@@ -266,10 +277,13 @@ def generate_demo_report(slug: str = "my-legacy-app") -> Report:
     weights = {"git_history": 1.0, "architecture": 1.2, "dependencies": 1.0,
                "complexity": 1.0, "tech_debt": 1.0, "coupling": 0.9}
     total_w = sum(weights.values())
-    overall = sum(r.score.value * weights[r.name] for r in runs) / total_w
+    overall = sum(
+        r.score.value * weights[r.name] for r in runs if r.score is not None
+    ) / total_w
     composition = [
         f"{r.score.label} = {r.score.value} (weight {round(weights[r.name] / total_w, 2)})"
         for r in runs
+        if r.score is not None
     ]
 
     all_findings = []
@@ -279,8 +293,8 @@ def generate_demo_report(slug: str = "my-legacy-app") -> Report:
 
     counts: dict[str, int] = {}
     for f in all_findings:
-        sev = f.severity.value if hasattr(f.severity, "value") else str(f.severity)
-        counts[sev] = counts.get(sev, 0) + 1
+        sev_key = f.severity.value if hasattr(f.severity, "value") else str(f.severity)
+        counts[sev_key] = counts.get(sev_key, 0) + 1
 
     finished = datetime.now(timezone.utc)
     duration_ms = int((finished - started).total_seconds() * 1000)
@@ -291,7 +305,7 @@ def generate_demo_report(slug: str = "my-legacy-app") -> Report:
         started_at=started,
         finished_at=finished,
         duration_ms=duration_ms,
-        scores=[r.score for r in runs],
+        scores=[r.score for r in runs if r.score is not None],
         overall_health=round(overall, 1),
         overall_band=Score.band_for(overall),
         runs=runs,

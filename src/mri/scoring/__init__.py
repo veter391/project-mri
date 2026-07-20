@@ -49,19 +49,19 @@ def compose_overall(
     scoring it as zero would silently turn a tooling failure into a bad verdict
     about the user's code.
     """
-    scored = [r for r in runs if r.score is not None]
+    scored = [(r, r.score) for r in runs if r.score is not None]
     unscored = [r.name for r in runs if r.score is None]
 
     if not scored:
         return Composition(value=UNMEASURED_VALUE, ledger=[], unscored=unscored)
 
-    pairs = [(r, weights.get(r.name, 1.0)) for r in scored]
+    pairs = [(score, weights.get(r.name, 1.0)) for r, score in scored]
     total_weight = sum(w for _, w in pairs) or 1.0
-    value = sum(r.score.value * w for r, w in pairs) / total_weight
+    value = sum(score.value * w for score, w in pairs) / total_weight
 
     ledger = [
-        f"{r.score.label} = {r.score.value} (weight {round(w / total_weight, 2)})"
-        for r, w in pairs
+        f"{score.label} = {score.value} (weight {round(w / total_weight, 2)})"
+        for score, w in pairs
     ]
     for name in unscored:
         ledger.append(f"{name} = not measured (excluded from the average)")

@@ -64,9 +64,12 @@ async def run_eval(base: Path | None = None) -> EvalReport:
     db = workdir / "eval.db"
     migrate(db)
     async with get_connection(db) as conn:
-        pid = int((await conn.execute(
+        cursor = await conn.execute(
             "INSERT INTO projects (name, path) VALUES ('eval', ?)", (str(case.repo),)
-        )).lastrowid)
+        )
+        if cursor.lastrowid is None:  # pragma: no cover - INSERT always sets a rowid
+            raise RuntimeError("INSERT did not return a rowid")
+        pid = int(cursor.lastrowid)
         await conn.commit()
 
         report = await run_fusion(

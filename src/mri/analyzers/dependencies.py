@@ -11,10 +11,18 @@ from __future__ import annotations
 import re
 from collections import defaultdict
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 
 from mri.analyzers.base import BaseAnalyzer, ScanContext
 from mri.analyzers.parsing import extract_imports
+
+
+class _GodConsumer(TypedDict):
+    """A module ranked by fan-in, with its fan-out for context."""
+
+    module: str
+    fanin: int
+    fanout: int
 
 # Regex fallback for Python (most common)
 _PY_IMPORT = re.compile(
@@ -80,8 +88,11 @@ class DependenciesAnalyzer(BaseAnalyzer):
             # God consumers (high fan-in)
             # all_modules is a set; sort with the module name as a secondary key
             # so equal-fan-in modules order stably (set iteration order is not).
+            consumer_rows: list[_GodConsumer] = [
+                {"module": m, "fanin": fanin[m], "fanout": fanout[m]} for m in all_modules
+            ]
             god_consumers = sorted(
-                ({"module": m, "fanin": fanin[m], "fanout": fanout[m]} for m in all_modules),
+                consumer_rows,
                 key=lambda x: (-x["fanin"], x["module"]),
             )[:5]
 

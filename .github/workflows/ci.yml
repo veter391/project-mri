@@ -36,8 +36,8 @@ jobs:
           pip install -e ".[dev]"
       - name: Ruff
         run: ruff check src tests
-      - name: MyPy (non-blocking)
-        run: mypy src/mri --ignore-missing-imports || true
+      - name: MyPy
+        run: mypy src/mri --ignore-missing-imports
       - name: Bandit
         run: bandit -r src/mri -ll
 

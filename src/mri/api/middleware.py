@@ -33,7 +33,9 @@ def _dashboard_script_hashes() -> tuple[str, ...]:
     try:
         manifest = (
             _pkg_files("mri")
-            .joinpath("_frontend", "dashboard", "csp-script-hashes.json")
+            .joinpath("_frontend")
+            .joinpath("dashboard")
+            .joinpath("csp-script-hashes.json")
         )
         if manifest.is_file():
             loaded = json.loads(manifest.read_text(encoding="utf-8"))

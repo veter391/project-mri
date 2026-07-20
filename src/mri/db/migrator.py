@@ -70,7 +70,7 @@ class Migration:
 
 def _discover() -> list[Migration]:
     """Load migrations from the package, ordered by filename."""
-    root = _pkg_files("mri").joinpath("db", "migrations")
+    root = _pkg_files("mri").joinpath("db").joinpath("migrations")
     names = sorted(p.name for p in root.iterdir() if p.name.endswith(".sql"))
     return [Migration(name, root.joinpath(name).read_text(encoding="utf-8")) for name in names]
 

@@ -19,6 +19,7 @@ from pathlib import Path
 
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
+from watchdog.observers.api import BaseObserver
 
 from mri.config import get_config
 
@@ -111,7 +112,7 @@ class RepoWatcher:
             ignore_globs = config.get("watch", {}).get("ignore_globs", [])
         self.debounce_seconds = debounce_seconds
         self.ignore_globs = ignore_globs
-        self._observer: Observer | None = None
+        self._observer: BaseObserver | None = None
         self._on_change = on_change
 
     def start(self) -> None:

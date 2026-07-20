@@ -519,7 +519,10 @@ async def insert_decisions_ignoring_duplicates(
     """
     if not decisions:
         return 0
-    before = (await (await conn.execute("SELECT count(*) FROM decisions")).fetchone())[0]
+    before_row = await (await conn.execute("SELECT count(*) FROM decisions")).fetchone()
+    if before_row is None:  # pragma: no cover - count(*) always returns one row
+        raise RuntimeError("count(*) returned no row")
+    before = before_row[0]
     try:
         await conn.execute("BEGIN")
         await conn.executemany(
@@ -529,7 +532,10 @@ async def insert_decisions_ignoring_duplicates(
     except Exception:
         await conn.rollback()
         raise
-    after = (await (await conn.execute("SELECT count(*) FROM decisions")).fetchone())[0]
+    after_row = await (await conn.execute("SELECT count(*) FROM decisions")).fetchone()
+    if after_row is None:  # pragma: no cover - count(*) always returns one row
+        raise RuntimeError("count(*) returned no row")
+    after = after_row[0]
     return int(after - before)
 
 
