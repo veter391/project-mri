@@ -119,13 +119,21 @@ async def _confounders_in_window(
     *,
     project_id: int,
     exclude_id: int | None,
+    file_path: str | None = None,
 ) -> list[str]:
-    """Other decisions in this project dated inside the window.
+    """The alternative explanations for a metric moving inside the window.
 
-    These are the alternative explanations for the metric moving — the honest
-    caveat that something else changed in the same span. Scoped to the project:
-    a decision in another repo cannot explain this one's metric, and counting it
-    would both mislead and leak another project's decision summaries.
+    Two classes, both scoped to the project (another repo's activity cannot
+    explain this one's metric, and counting it would leak its data):
+
+    1. **Overlapping decisions** — any other decision dated in the window. A
+       refactor or release that landed as a commit is itself a commit-sourced
+       decision, so it is already captured here with its summary visible.
+    2. **Concurrent same-file changes** — other agent sessions that wrote the
+       decision's file during the window (only when a file is known). A file
+       being actively modified while the metric moved is a real competing cause;
+       each such session lowers confidence, erring — deliberately — toward less
+       certainty rather than more.
 
     Bounded: a huge window returns a sample plus a truthful "and N more" rather
     than a list of thousands written into one row.
@@ -139,10 +147,30 @@ async def _confounders_in_window(
         """,
         (project_id, _utc_iso(start), _utc_iso(end)),
     )
-    others = [
+    confounders = [
         summary for decision_id, summary in await cursor.fetchall() if decision_id != exclude_id
     ]
-    return others
+
+    if file_path is not None:
+        touched = await conn.execute(
+            """
+            SELECT DISTINCT s.external_id
+            FROM session_file_touches t
+            JOIN sessions s ON s.id = t.session_id
+            WHERE t.project_id = ? AND t.file_path = ?
+                  AND t.touch_kind IN ('write', 'create', 'delete')
+                  AND t.occurred_at IS NOT NULL
+                  AND t.occurred_at >= ? AND t.occurred_at <= ?
+            ORDER BY s.external_id
+            """,
+            (project_id, file_path, _utc_iso(start), _utc_iso(end)),
+        )
+        for (external_id,) in await touched.fetchall():
+            confounders.append(
+                f"the file was also modified in agent session '{external_id}' during the window"
+            )
+
+    return confounders
 
 
 def _sample_confounders(all_confounders: list[str]) -> list[str]:
@@ -225,7 +253,8 @@ async def measure_consequence(
         return None
 
     confounders = await _confounders_in_window(
-        conn, window_start, window_end, project_id=project_id, exclude_id=decision.id
+        conn, window_start, window_end,
+        project_id=project_id, exclude_id=decision.id, file_path=decision.file_path,
     )
     return _build_consequence(
         metric, baseline, observed, window_start, window_end, confounders,
@@ -254,9 +283,10 @@ async def measure_decision_consequences(
     window_start = decision.decided_at
     window_end = window_start + timedelta(days=window_days)
     # The confounders are the same for every metric of this decision — one
-    # window, one project — so the query runs once, not once per metric.
+    # window, one project, one file — so the query runs once, not once per metric.
     confounders = await _confounders_in_window(
-        conn, window_start, window_end, project_id=project_id, exclude_id=decision.id
+        conn, window_start, window_end,
+        project_id=project_id, exclude_id=decision.id, file_path=decision.file_path,
     )
 
     measured: list[Consequence] = []

@@ -15,7 +15,8 @@ from mri.db import fusion_repository as repo
 from mri.db.migrator import migrate
 from mri.db.repository import get_connection
 from mri.fusion import measure_consequence, measure_decision_consequences
-from mri.models.fusion import Decision
+from mri.models.fusion import Decision, Session, SessionFileTouch
+from mri.utils import utc_iso
 
 
 @pytest.fixture
@@ -58,6 +59,38 @@ async def _decision(
 
 def _dt(day: int) -> datetime:
     return datetime(2026, 3, day, tzinfo=timezone.utc)
+
+
+async def test_a_concurrent_same_file_agent_change_is_named_as_a_confounder(db: Path):
+    """Phase 8.3: another agent session writing the decision's file inside the
+    window is a competing cause. It must be named, and it must lower confidence —
+    the honesty bias is toward less certainty, not more."""
+    async with get_connection(db) as conn:
+        pid = await _project(conn)
+        await _scan_with_score(conn, pid, _dt(1), "complexity", 40.0)   # before
+        decision = await repo.insert_decision(
+            conn,
+            Decision(summary="refactor ledger", source="commit", source_ref="abc123",
+                     project_id=pid, file_path="app.py", decided_at=_dt(10), confidence=0.6),
+        )
+        await _scan_with_score(conn, pid, _dt(20), "complexity", 55.0)  # after — a real move
+
+        # A different agent session writes the SAME file inside the window.
+        s = await repo.upsert_session(
+            conn, Session(source="claude_code", external_id="other-sess", project_id=pid)
+        )
+        await repo.insert_session_file_touch(
+            conn,
+            SessionFileTouch(session_id=s.id, project_id=pid, file_path="app.py",
+                             touch_kind="write", confidence=0.9, occurred_at=utc_iso(_dt(15))),
+        )
+
+        c = await measure_consequence(conn, decision, "complexity", project_id=pid)
+    assert c is not None
+    assert any("other-sess" in cf for cf in c.confounders), (
+        "the concurrent same-file session must be named as a confounder"
+    )
+    assert c.confidence < 0.6, "a competing same-file change must lower confidence below the un-confounded cap"
 
 
 async def test_it_measures_a_before_and_after_delta(db: Path):
