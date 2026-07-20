@@ -51,6 +51,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# The agent-native MCP server is an optional surface — the CLI and HTTP API work
+# without it — so the SDK is not forced on a core install. Enable with
+# `pip install project-mri[mcp]`.
+mcp = [
+    "mcp>=1.28",
+]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",

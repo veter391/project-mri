@@ -1,4 +1,4 @@
-"""`mri` CLI — subcommands: init, scan, fusion, eval, serve, watch, demo, backup, restore, upgrade, reset, ui."""
+"""`mri` CLI — subcommands: init, scan, fusion, eval, mcp, serve, watch, demo, backup, restore, upgrade, reset, ui."""
 from __future__ import annotations
 
 import getpass
@@ -336,6 +336,35 @@ def eval_cmd(json_out: str | None) -> None:
             sys.exit(1)
 
     asyncio.run(go())
+
+
+# ---------------------------------------------------------------------------
+# mri mcp — serve MRI as an agent-native MCP provider (stdio)
+# ---------------------------------------------------------------------------
+
+
+@cli.command()
+def mcp() -> None:
+    """Serve MRI's fusion tools to coding agents over MCP (stdio transport).
+
+    Exposes fuse_project, explain_file, get_authorship and get_decisions so an
+    agent can ask who authored a file and what decided it, mid-task. Needs the
+    optional MCP dependency: `pip install project-mri[mcp]`.
+    """
+    try:
+        from mri.mcp_server import build_server
+    except ModuleNotFoundError as e:
+        click.echo(f"✗ {e}", err=True)
+        sys.exit(1)
+
+    try:
+        server = build_server()
+    except ModuleNotFoundError as e:
+        click.echo(f"✗ {e}", err=True)
+        sys.exit(1)
+
+    click.echo("→ project-mri MCP server on stdio (Ctrl+C to stop)", err=True)
+    server.run(transport="stdio")
 
 
 # ---------------------------------------------------------------------------
