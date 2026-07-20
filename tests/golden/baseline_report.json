@@ -1,0 +1,395 @@
+{
+  "composition": [
+    "history_health = 65.0 (weight 0.16)",
+    "architecture_health = 67.0 (weight 0.2)",
+    "dependency_health = 100.0 (weight 0.16)",
+    "complexity_health = 100.0 (weight 0.16)",
+    "debt_index = 100.0 (weight 0.16)",
+    "coupling_health = 100.0 (weight 0.15)"
+  ],
+  "duration_ms": "<volatile>",
+  "findings": [
+    {
+      "category": "god_module",
+      "data": {
+        "files": 2,
+        "languages": [
+          "python"
+        ],
+        "loc": 14,
+        "max_depth": 0,
+        "name": "(root)",
+        "share": 1.0
+      },
+      "description": "Module '(root)/' holds 14 LOC across 2 files \u2014 100% of the codebase. Extract sub-modules or split concerns.",
+      "score": 80.0,
+      "severity": "high",
+      "target_path": "(root)/",
+      "target_symbol": "",
+      "title": "God module: (root)/"
+    }
+  ],
+  "finished_at": "<volatile>",
+  "overall_band": "excellent",
+  "overall_health": 87.8,
+  "project": {
+    "default_branch": "main",
+    "name": "fixture",
+    "path": "<volatile>"
+  },
+  "runs": [
+    {
+      "duration_ms": "<volatile>",
+      "error_message": "",
+      "findings": [],
+      "finished_at": "<volatile>",
+      "name": "git_history",
+      "score": {
+        "band": "fair",
+        "causal_claim": "none",
+        "contributors": [
+          "bus_factor = 1 (single point of failure) (-35.0)"
+        ],
+        "decomposition": {},
+        "label": "history_health",
+        "value": 65.0
+      },
+      "signals": {
+        "authors": 1,
+        "bus_factor": 1,
+        "cadence": {
+          "last_90_days": 0,
+          "prior_90_days": 0,
+          "ratio": null
+        },
+        "commit_count": 2,
+        "files_touched": 2,
+        "knowledge_islands": 0,
+        "top_hotspots": [],
+        "total_churn": 14
+      },
+      "started_at": "<volatile>",
+      "status": "completed"
+    },
+    {
+      "duration_ms": "<volatile>",
+      "error_message": "",
+      "findings": [
+        {
+          "category": "god_module",
+          "data": {
+            "files": 2,
+            "languages": [
+              "python"
+            ],
+            "loc": 14,
+            "max_depth": 0,
+            "name": "(root)",
+            "share": 1.0
+          },
+          "description": "Module '(root)/' holds 14 LOC across 2 files \u2014 100% of the codebase. Extract sub-modules or split concerns.",
+          "score": 80.0,
+          "severity": "high",
+          "target_path": "(root)/",
+          "target_symbol": "",
+          "title": "God module: (root)/"
+        }
+      ],
+      "finished_at": "<volatile>",
+      "name": "architecture",
+      "score": {
+        "band": "fair",
+        "causal_claim": "none",
+        "contributors": [
+          "1 god module(s); few modules (-33.0)"
+        ],
+        "decomposition": {},
+        "label": "architecture_health",
+        "value": 67.0
+      },
+      "signals": {
+        "deep_modules": [],
+        "god_modules": [
+          {
+            "files": 2,
+            "languages": [
+              "python"
+            ],
+            "loc": 14,
+            "max_depth": 0,
+            "name": "(root)",
+            "share": 1.0
+          }
+        ],
+        "imbalance_ratio": 0,
+        "module_count": 1,
+        "modules": [
+          {
+            "files": 2,
+            "languages": [
+              "python"
+            ],
+            "loc": 14,
+            "max_depth": 0,
+            "name": "(root)"
+          }
+        ],
+        "total_loc": 14
+      },
+      "started_at": "<volatile>",
+      "status": "completed"
+    },
+    {
+      "duration_ms": "<volatile>",
+      "error_message": "",
+      "findings": [],
+      "finished_at": "<volatile>",
+      "name": "dependencies",
+      "score": {
+        "band": "excellent",
+        "causal_claim": "none",
+        "contributors": [
+          "no import cycles"
+        ],
+        "decomposition": {},
+        "label": "dependency_health",
+        "value": 100.0
+      },
+      "signals": {
+        "cycle_count": 0,
+        "cycles_sample": [],
+        "edge_count": 0,
+        "fanin_top": [
+          [
+            "app",
+            0
+          ],
+          [
+            "util",
+            0
+          ]
+        ],
+        "fanout_top": [
+          [
+            "app",
+            0
+          ],
+          [
+            "util",
+            0
+          ]
+        ],
+        "god_consumers": [
+          {
+            "fanin": 0,
+            "fanout": 0,
+            "module": "app"
+          },
+          {
+            "fanin": 0,
+            "fanout": 0,
+            "module": "util"
+          }
+        ],
+        "largest_cycle_size": 0,
+        "module_count": 2,
+        "orphan_count": 2
+      },
+      "started_at": "<volatile>",
+      "status": "completed"
+    },
+    {
+      "duration_ms": "<volatile>",
+      "error_message": "",
+      "findings": [],
+      "finished_at": "<volatile>",
+      "name": "complexity",
+      "score": {
+        "band": "excellent",
+        "causal_claim": "none",
+        "contributors": [
+          "all files <= 500 LOC",
+          "all functions at or under cyclomatic complexity 10"
+        ],
+        "decomposition": {},
+        "label": "complexity_health",
+        "value": 100.0
+      },
+      "signals": {
+        "comment_ratio": 0.0714,
+        "complex_function_count": 0,
+        "complex_functions": [],
+        "files_scanned": 2,
+        "function_count": 3,
+        "long_file_count": 0,
+        "long_files": [],
+        "long_functions": [],
+        "max_cyclomatic": 2,
+        "max_file_loc": 12,
+        "median_cyclomatic": 1,
+        "median_file_loc": 7.0,
+        "median_function_length": 2,
+        "per_language": {
+          "python": {
+            "files": 2,
+            "loc": 14
+          }
+        },
+        "total_loc": 14
+      },
+      "started_at": "<volatile>",
+      "status": "completed"
+    },
+    {
+      "duration_ms": "<volatile>",
+      "error_message": "",
+      "findings": [],
+      "finished_at": "<volatile>",
+      "name": "tech_debt",
+      "score": {
+        "band": "excellent",
+        "causal_claim": "none",
+        "contributors": [
+          "debt density = 0.0 /kLOC (clean)"
+        ],
+        "decomposition": {},
+        "label": "debt_index",
+        "value": 100.0
+      },
+      "signals": {
+        "debt_counts": {},
+        "debt_per_kloc": 0.0,
+        "debt_total_weighted": 0.0,
+        "generated_loc": 0,
+        "top_debt_files": [],
+        "total_loc": 14,
+        "vendored_files": 0
+      },
+      "started_at": "<volatile>",
+      "status": "completed"
+    },
+    {
+      "duration_ms": "<volatile>",
+      "error_message": "",
+      "findings": [],
+      "finished_at": "<volatile>",
+      "name": "coupling",
+      "score": {
+        "band": "excellent",
+        "causal_claim": "none",
+        "contributors": [
+          "no stable+concrete modules in main sequence",
+          "avg instability = 0.0"
+        ],
+        "decomposition": {},
+        "label": "coupling_health",
+        "value": 100.0
+      },
+      "signals": {
+        "avg_instability": 0.0,
+        "metrics_sample": [
+          {
+            "A": 0.0,
+            "Ca": 0,
+            "Ce": 0,
+            "D": 0.707,
+            "I": 0.0,
+            "module": "app"
+          },
+          {
+            "A": 0.0,
+            "Ca": 0,
+            "Ce": 0,
+            "D": 0.707,
+            "I": 0.0,
+            "module": "util"
+          }
+        ],
+        "module_count": 2,
+        "painful_modules": []
+      },
+      "started_at": "<volatile>",
+      "status": "completed"
+    }
+  ],
+  "scan_uuid": "<volatile>",
+  "scores": [
+    {
+      "band": "fair",
+      "causal_claim": "none",
+      "contributors": [
+        "bus_factor = 1 (single point of failure) (-35.0)"
+      ],
+      "decomposition": {},
+      "label": "history_health",
+      "value": 65.0
+    },
+    {
+      "band": "fair",
+      "causal_claim": "none",
+      "contributors": [
+        "1 god module(s); few modules (-33.0)"
+      ],
+      "decomposition": {},
+      "label": "architecture_health",
+      "value": 67.0
+    },
+    {
+      "band": "excellent",
+      "causal_claim": "none",
+      "contributors": [
+        "no import cycles"
+      ],
+      "decomposition": {},
+      "label": "dependency_health",
+      "value": 100.0
+    },
+    {
+      "band": "excellent",
+      "causal_claim": "none",
+      "contributors": [
+        "all files <= 500 LOC",
+        "all functions at or under cyclomatic complexity 10"
+      ],
+      "decomposition": {},
+      "label": "complexity_health",
+      "value": 100.0
+    },
+    {
+      "band": "excellent",
+      "causal_claim": "none",
+      "contributors": [
+        "debt density = 0.0 /kLOC (clean)"
+      ],
+      "decomposition": {},
+      "label": "debt_index",
+      "value": 100.0
+    },
+    {
+      "band": "excellent",
+      "causal_claim": "none",
+      "contributors": [
+        "no stable+concrete modules in main sequence",
+        "avg instability = 0.0"
+      ],
+      "decomposition": {},
+      "label": "coupling_health",
+      "value": 100.0
+    }
+  ],
+  "started_at": "<volatile>",
+  "stats": {
+    "commit_count": 2,
+    "file_count": 2,
+    "finding_counts": {
+      "high": 1
+    },
+    "languages": {
+      "python": {
+        "files": 2,
+        "loc": 14
+      }
+    },
+    "loc_total": 14
+  }
+}

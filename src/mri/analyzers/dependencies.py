@@ -78,9 +78,11 @@ class DependenciesAnalyzer(BaseAnalyzer):
                     fanin[dst] += 1
 
             # God consumers (high fan-in)
+            # all_modules is a set; sort with the module name as a secondary key
+            # so equal-fan-in modules order stably (set iteration order is not).
             god_consumers = sorted(
                 ({"module": m, "fanin": fanin[m], "fanout": fanout[m]} for m in all_modules),
-                key=lambda x: -x["fanin"],
+                key=lambda x: (-x["fanin"], x["module"]),
             )[:5]
 
             # Isolated modules (no edges at all — orphans)
@@ -147,8 +149,8 @@ class DependenciesAnalyzer(BaseAnalyzer):
                 "cycles_sample": [c[:25] for c in cycles[:5]],
                 "largest_cycle_size": max((len(c) for c in cycles), default=0),
                 "god_consumers": god_consumers,
-                "fanin_top": sorted(fanin.items(), key=lambda kv: -kv[1])[:10],
-                "fanout_top": sorted(fanout.items(), key=lambda kv: -kv[1])[:10],
+                "fanin_top": sorted(fanin.items(), key=lambda kv: (-kv[1], kv[0]))[:10],
+                "fanout_top": sorted(fanout.items(), key=lambda kv: (-kv[1], kv[0]))[:10],
                 "orphan_count": len(orphans),
             }
             self._finish_ok()

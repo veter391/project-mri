@@ -72,7 +72,9 @@ class ArchitectureAnalyzer(BaseAnalyzer):
                     "max_depth": data["max_depth"],
                     "languages": sorted(data["languages"]),
                 })
-            modules_view.sort(key=lambda m: -m["loc"])
+            # Name as secondary key so equal-LOC modules order stably (the
+            # modules dict's insertion order is not a guarantee).
+            modules_view.sort(key=lambda m: (-m["loc"], m["name"]))
 
             # --- God modules (single module dominates LOC) ---
             total_loc = sum(m["loc"] for m in modules_view)

@@ -102,7 +102,9 @@ class CouplingAnalyzer(BaseAnalyzer):
 
             # Painful modules: stable (low I) + concrete (low A) + high fan-in
             painful = [m for m in metrics if m["D"] > 0.5 and m["Ca"] >= 3]
-            painful.sort(key=lambda x: -x["D"])
+            # Secondary key on the module name so equal-D modules order stably —
+            # otherwise the report is non-deterministic run to run.
+            painful.sort(key=lambda x: (-x["D"], x["module"]))
 
             # Findings
             for pm in painful[:10]:
@@ -140,7 +142,7 @@ class CouplingAnalyzer(BaseAnalyzer):
             self.run.signals = {
                 "module_count": len(metrics),
                 "painful_modules": painful[:10],
-                "metrics_sample": sorted(metrics, key=lambda x: -x["Ca"])[:15],
+                "metrics_sample": sorted(metrics, key=lambda x: (-x["Ca"], x["module"]))[:15],
                 "avg_instability": round(avg_I, 3) if metrics else 0,
             }
             self._finish_ok()
