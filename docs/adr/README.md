@@ -13,6 +13,7 @@ decision, and what it costs — including decisions that were later superseded.
 | [006](ADR-006-oss-adoption.md) | Which libraries we adopt, and which we do not | Accepted |
 | [007](ADR-007-duckdb-deferred.md) | DuckDB is deferred, not adopted | Accepted |
 | [008](ADR-008-authorship-line-shares-deferred.md) | Authorship line-shares: deferred, then resolved via 5.2 | Resolved |
+| [009](ADR-009-cursor-aider-ingest-deferred.md) | Cursor/aider ingest deferred until real logs exist | Accepted |
 
 ## Conventions
 
