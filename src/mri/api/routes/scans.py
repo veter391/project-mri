@@ -750,18 +750,40 @@ async def get_report_sarif(
         raise HTTPException(409, "scan not completed yet")
     raw = json.loads(row["report_json"])
     report = Report.model_validate(raw)
-    sarif = _to_sarif(report)
+
+    # Attach stored authorship shares (newest per file) if a fusion run computed
+    # any, so the SARIF a CI reads carries provenance next to each finding.
+    cur = await conn.execute(
+        "SELECT file_path, share_ai, share_unattributed, method, confidence, MAX(created_at)"
+        " FROM authorship_shares WHERE project_id = ? GROUP BY file_path",
+        (row["project_id"],),
+    )
+    authorship = {
+        r[0]: {
+            "ai_authored_pct": r[1], "unattributed_pct": r[2],
+            "method": r[3], "confidence": r[4],
+        }
+        for r in await cur.fetchall()
+    }
+
+    sarif = _to_sarif(report, authorship=authorship)
     return Response(
         content=json.dumps(sarif, indent=2),
         media_type="application/sarif+json",
     )
 
 
-def _to_sarif(report: Report) -> dict:
+def _to_sarif(report: Report, authorship: dict[str, dict] | None = None) -> dict:
     """Convert a Report to SARIF 2.1.0 format.
 
     SARIF is the OASIS standard for static analysis output. Supported by
     GitHub Code Scanning, GitLab Code Quality, Azure DevOps, IDEs, etc.
+
+    `authorship` maps a file path to its stored AI/unattributed line-share (from
+    a prior fusion run); when a finding names such a file, the share rides along
+    in its properties so CI sees provenance, not just the score. It is a plain
+    fact attached to the finding, never a severity input — who wrote a file does
+    not change how risky it is.
     """
     severity_to_sarif_level = {
         "info": "note",
@@ -770,6 +792,20 @@ def _to_sarif(report: Report) -> dict:
         "high": "error",
         "critical": "error",
     }
+    shares = authorship or {}
+
+    def _props(f, analyzer: str) -> dict:
+        props = {
+            "analyzer": analyzer,
+            "severity": f.severity.value,
+            "score": f.score,
+            "title": f.title,
+            "category": f.category,
+        }
+        share = shares.get(f.target_path) if f.target_path else None
+        if share is not None:
+            props["ai_authorship"] = share
+        return props
     runs = []
     for run in report.runs:
         results = []
@@ -784,13 +820,7 @@ def _to_sarif(report: Report) -> dict:
                         "region": {"startLine": 1},
                     },
                 }] if f.target_path else [],
-                "properties": {
-                    "analyzer": run.name,
-                    "severity": f.severity.value,
-                    "score": f.score,
-                    "title": f.title,
-                    "category": f.category,
-                },
+                "properties": _props(f, run.name),
             })
         runs.append({
             "tool": {
@@ -826,13 +856,7 @@ def _to_sarif(report: Report) -> dict:
                         "region": {"startLine": 1},
                     },
                 }] if f.target_path else [],
-                "properties": {
-                    "analyzer": "project-mri",
-                    "severity": f.severity.value,
-                    "score": f.score,
-                    "title": f.title,
-                    "category": f.category,
-                },
+                "properties": _props(f, "project-mri"),
             })
         runs.append({
             "tool": {
