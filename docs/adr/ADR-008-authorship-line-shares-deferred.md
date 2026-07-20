@@ -1,9 +1,31 @@
 # ADR-008 — Per-file authorship line-shares are deferred; risk is weighted by evidence instead
 
-- **Status:** Accepted
+- **Status:** Resolved (2026-07-20) — the deferral's blocker is gone; line-shares
+  now ship. See "Resolution" below. The evidence-weighted risk from the original
+  decision remains as the complementary, lighter signal.
 - **Date:** 2026-07-19
 - **Relates to:** [ADR-007](ADR-007-duckdb-deferred.md) (the fusion layers),
   migration [0002] (`authorship_shares`), the session ingest.
+
+## Resolution (2026-07-20)
+
+The deferral rested on one blocker: with only session touches, a line could not
+be tied to a commit, so its authorship could not be measured. Block 5.2
+(session-to-commit correlation) removed that blocker by linking each write touch
+to the earliest commit that materialised it. With that link, `git blame` gives
+every current line its last-modifying commit, and a line whose commit is
+agent-attributed is AI-authored; everything else is unattributed, never human.
+
+This ships in `src/mri/fusion/line_authorship.py` and populates the
+`authorship_shares` table this ADR had left empty. The "when to revisit"
+condition below — commit-level attribution — is exactly what was built, so the
+deferral is closed rather than pending. Verified on this repo: a file this
+project largely wrote measures 91% AI-authored, a barely-touched one 6%, shares
+summing to 100 with `human` at 0.
+
+The original decision and its measurement are kept below unedited, because the
+reasoning for *why* a naive line-share was dishonest still governs how the new
+one is computed.
 
 ## Context
 
