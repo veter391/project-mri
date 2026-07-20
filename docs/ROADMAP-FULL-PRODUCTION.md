@@ -91,9 +91,12 @@ are in "Planned" below, each gated on a real input rather than started early.
 
 ## Planned
 
-- **Session-reasoning mining.** Recover the *why* an agent made a change from
-  the reasoning in its session log — off by default, since logs can hold
-  secrets, and gated behind explicit content retention.
+- **Session-reasoning mining.** Recover the *why* an agent made a change from the
+  reasoning in its session log. Free-form rationale extraction is deferred as an
+  over-claim without a validated corpus ([ADR-012](adr/ADR-012-session-reasoning-mining-deferred.md));
+  the verifiable slice named there is deterministic citation-linking of stored
+  reasoning to decisions the project already records. Off by default, since logs
+  can hold secrets, and gated behind explicit content retention.
 - **Third-party log formats.** Ingest Cursor and aider session logs once a
   verified real-world sample of each format is in hand ([ADR-009](adr/ADR-009-cursor-aider-ingest-deferred.md)).
 
