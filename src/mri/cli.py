@@ -1,4 +1,4 @@
-"""`mri` CLI — subcommands: init, scan, serve, watch, demo, backup, restore, upgrade, reset, ui."""
+"""`mri` CLI — subcommands: init, scan, fusion, serve, watch, demo, backup, restore, upgrade, reset, ui."""
 from __future__ import annotations
 
 import getpass
@@ -183,6 +183,101 @@ def scan(project_path: str, branch: str | None, output: str, json_out: str | Non
         click.echo(f"  overall health: {report.overall_health:.1f}/100 ({report.overall_band})", err=True)
         click.echo(f"  duration: {report.duration_ms} ms", err=True)
         click.echo(f"  findings: {len(report.findings)}", err=True)
+
+    asyncio.run(go())
+
+
+# ---------------------------------------------------------------------------
+# mri fusion — fuse agent provenance onto a scanned repo
+# ---------------------------------------------------------------------------
+
+
+@cli.command()
+@click.argument("project_path", type=click.Path(exists=True, file_okay=False, dir_okay=True))
+@click.option("--top", default=10, type=int, help="How many risky files to explain")
+@click.option(
+    "--store-content", is_flag=True,
+    help="Retain agent prompt/response text (off by default; logs can hold secrets)",
+)
+@click.option("--json-out", default=None, help="Write the fusion report as JSON to this path")
+@click.option("--quiet", "-q", is_flag=True, help="Suppress progress output")
+def fusion(project_path: str, top: int, store_content: bool, json_out: str | None, quiet: bool) -> None:
+    """Fuse agent sessions, decisions and consequences onto a scanned repo.
+
+    Reads local agent session logs, links them to the commits they produced,
+    computes per-file AI/human/unattributed authorship, mines decisions from
+    ADRs and commits, and explains the repo's riskiest files — the files your
+    last `mri scan` flagged. Run `mri scan <path>` first so there are hotspots
+    to explain.
+    """
+    import asyncio
+    import json as _json
+
+    click.echo(f"→ fusing agent provenance onto {project_path}", err=True)
+
+    async def go() -> None:
+        import git
+
+        from mri.db.repository import get_connection, top_risk_files, upsert_project
+        from mri.fusion import run_fusion
+
+        root = Path(project_path).resolve()
+        try:
+            repo = git.Repo(root)
+        except Exception:  # noqa: BLE001 - any GitPython error means "not a usable repo"
+            click.echo(f"✗ {root} is not a git repository", err=True)
+            sys.exit(1)
+
+        adr_dir = root / "docs" / "adr"
+        async with get_connection() as conn:
+            project_id = await upsert_project(
+                conn, path=str(root), name=root.name, default_branch="HEAD"
+            )
+            hotspots = await top_risk_files(conn, project_id, limit=top)
+            if not hotspots and not quiet:
+                click.echo(
+                    "  ! no scored files found — run `mri scan` first to get hotspots to explain",
+                    err=True,
+                )
+
+            report = await run_fusion(
+                conn, repo, root, project_id=project_id,
+                hotspots=hotspots or None,
+                adr_dir=adr_dir if adr_dir.is_dir() else None,
+                store_content=store_content,
+            )
+
+        if not quiet:
+            click.echo(
+                f"  sessions: {report.ingest.sessions} · touches: {report.ingest.touches} · "
+                f"correlated: {report.correlation.linked} → {len(report.correlation.commits)} commits",
+                err=True,
+            )
+            click.echo(
+                f"  decisions: {report.adrs} ADR + {report.commits} commit · "
+                f"cross-links: {report.decision_links} · files authored: {report.authored_files}",
+                err=True,
+            )
+
+        for exp in report.explanations:
+            click.echo(exp.prose)
+
+        if json_out:
+            payload = {
+                "ingest": {"sessions": report.ingest.sessions, "touches": report.ingest.touches},
+                "correlation": {"linked": report.correlation.linked,
+                                "commits": len(report.correlation.commits)},
+                "decisions": {"adr": report.adrs, "commit": report.commits,
+                              "cross_links": report.decision_links},
+                "files": [
+                    {"file": e.file_path, "prose": e.prose,
+                     "factors": [{"name": f.name, "value": f.value} for f in e.factors]}
+                    for e in report.explanations
+                ],
+            }
+            Path(json_out).write_text(_json.dumps(payload, indent=2), encoding="utf-8")
+            if not quiet:
+                click.echo(f"  ✓ JSON → {json_out}", err=True)
 
     asyncio.run(go())
 

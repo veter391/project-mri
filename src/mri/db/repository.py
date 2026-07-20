@@ -414,6 +414,40 @@ async def get_scan_runs(conn: aiosqlite.Connection, scan_id: int) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+async def top_risk_files(
+    conn: aiosqlite.Connection, project_id: int, *, limit: int = 10
+) -> dict[str, float]:
+    """The riskiest files from a project's latest completed scan, as
+    {file_path: score}. These are what the fusion loop explains — the files the
+    scan already flagged, now annotated with who authored them and why.
+
+    A finding's target_path can be a directory (an architecture finding) or a
+    symbol; only file-shaped paths are returned, since authorship is per file.
+    The highest score per path wins when several findings name the same file.
+    """
+    cursor = await conn.execute(
+        """
+        SELECT f.target_path, MAX(f.score) AS score
+        FROM findings f
+        JOIN analyzer_runs r ON r.id = f.run_id
+        JOIN scans s ON s.id = r.scan_id
+        WHERE s.project_id = ?
+          AND s.id = (
+              SELECT id FROM scans
+              WHERE project_id = ? AND status = 'completed'
+              ORDER BY started_at DESC LIMIT 1
+          )
+          AND f.target_path != '' AND f.target_path NOT LIKE '%/'
+          AND f.score IS NOT NULL
+        GROUP BY f.target_path
+        ORDER BY score DESC
+        LIMIT ?
+        """,
+        (project_id, project_id, limit),
+    )
+    return {str(row[0]): float(row[1]) for row in await cursor.fetchall()}
+
+
 async def get_findings(
     conn: aiosqlite.Connection, run_id: int, *, severity: str | None = None
 ) -> list[dict]:
