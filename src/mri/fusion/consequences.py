@@ -1,19 +1,21 @@
-"""The consequence loop — what measurably changed after a decision.
+"""The consequence loop — what measurably changed after a decision or a session.
 
 This is the layer most able to lie, so it is the one most constrained. It takes
-a decision with a date, a metric with a scan history, and a window, and reports
-how the metric moved from just before the decision to the end of the window.
+an anchor (a decision with a date, or an agent session), a metric with a scan
+history, and a window, and reports how the metric moved from just before the
+anchor to the end of the window.
 
 What it says, and does not say:
 
-* It reports **correlation**, always. A metric moving after a decision is not
-  the decision having moved it, and `causal_claim` is fixed to `correlation` —
-  the schema will not even store `causation` from this path.
+* It reports **correlation**, never causation — the schema will not store
+  `causation` from this path. And a move within the re-scoring **noise floor**
+  claims nothing: it is recorded with `causal_claim='none'` and zero confidence,
+  because "followed by no discernible change" is a real finding, not a link.
 * It reports the **confounders** it can see: every other decision whose date
   falls in the same window is an alternative explanation, listed by name, and
   the more of them there are the lower the confidence.
-* It reports **nothing** when it cannot measure — no scan before the decision,
-  or none after it in the window. A missing measurement is absence, returned as
+* It reports **nothing** when it cannot measure — no scan before the anchor, or
+  none after it in the window. A missing measurement is absence, returned as
   None, not a zero delta dressed as a finding.
 
 Confidence is never high. A single before-and-after pair across a noisy window,
@@ -29,10 +31,14 @@ from datetime import datetime, timedelta
 import aiosqlite
 
 from mri.db import fusion_repository as repo
-from mri.models.fusion import Consequence, Decision
+from mri.models.fusion import Consequence, Decision, Session
 from mri.utils import utc_iso
 
-__all__ = ["measure_consequence", "measure_decision_consequences"]
+__all__ = [
+    "measure_consequence",
+    "measure_decision_consequences",
+    "measure_session_consequences",
+]
 
 #: A before/after pair over a window is correlation over noise. Even with no
 #: other decision in the window, it is not certainty — so confidence is capped
@@ -46,6 +52,11 @@ DEFAULT_WINDOW_DAYS = 30
 #: decisions does not need thousands listed on the row; a sample plus the true
 #: count says as much without writing a multi-megabyte blob per consequence.
 MAX_CONFOUNDERS_LISTED = 50
+#: A movement smaller than this (on the 0..100 score scale) is within the noise
+#: of re-scoring and is not a correlation to claim. The measurement is still
+#: recorded — "this decision was followed by no discernible change" is a real,
+#: useful finding — but its causal_claim is 'none', not 'correlation'.
+NOISE_THRESHOLD = 1.0
 
 
 #: Normalise a moment to canonical UTC before comparing it against stored
@@ -146,14 +157,17 @@ def _sample_confounders(all_confounders: list[str]) -> list[str]:
 
 
 def _build_consequence(
-    decision: Decision, metric: str, baseline: _ScorePoint, observed: _ScorePoint,
+    metric: str, baseline: _ScorePoint, observed: _ScorePoint,
     window_start: datetime, window_end: datetime, confounders: list[str],
+    *, decision_id: int | None = None, session_id: int | None = None,
+    file_path: str | None = None,
 ) -> Consequence | None:
     """Assemble a consequence, or None if the scores are not real measurements.
 
-    A non-finite score is an upstream analyzer bug, not a finding: an inf delta
-    would be persisted and round-tripped as if it meant something. It is dropped
-    the same way an unmeasurable metric is — absence, not a fabricated number.
+    Anchored to a decision or a session (exactly one). A non-finite score is an
+    upstream analyzer bug, not a finding: an inf delta would be persisted and
+    round-tripped as if it meant something. It is dropped the same way an
+    unmeasurable metric is — absence, not a fabricated number.
     """
     if not (math.isfinite(baseline.value) and math.isfinite(observed.value)):
         return None
@@ -162,18 +176,25 @@ def _build_consequence(
     # truncated sample: one other change halves it, more lowers it further, and
     # it is capped below one because a before/after over a window is correlation.
     confidence = round(_MAX_CONFIDENCE / (1 + len(confounders)), 3)
+    delta = observed.value - baseline.value
+    # A movement within the re-scoring noise is not a correlation to claim. The
+    # measurement is kept — "followed by no discernible change" is a real finding
+    # — but it claims nothing, and its confidence is not inflated by confounders
+    # it is not asserting a link through.
+    within_noise = abs(delta) < NOISE_THRESHOLD
     return Consequence(
-        decision_id=decision.id,
+        decision_id=decision_id,
+        session_id=session_id,
         metric=metric,
-        file_path=decision.file_path,
+        file_path=file_path,
         window_start=window_start,
         window_end=window_end,
         baseline_value=round(baseline.value, 3),
         observed_value=round(observed.value, 3),
-        delta=round(observed.value - baseline.value, 3),
-        causal_claim="correlation",  # never causation from this path
+        delta=round(delta, 3),
+        causal_claim="none" if within_noise else "correlation",  # never causation
         confounders=_sample_confounders(confounders),
-        confidence=confidence,
+        confidence=0.0 if within_noise else confidence,
     )
 
 
@@ -207,7 +228,8 @@ async def measure_consequence(
         conn, window_start, window_end, project_id=project_id, exclude_id=decision.id
     )
     return _build_consequence(
-        decision, metric, baseline, observed, window_start, window_end, confounders
+        metric, baseline, observed, window_start, window_end, confounders,
+        decision_id=decision.id, file_path=decision.file_path,
     )
 
 
@@ -244,7 +266,52 @@ async def measure_decision_consequences(
         if baseline is None or observed is None:
             continue
         consequence = _build_consequence(
-            decision, metric, baseline, observed, window_start, window_end, confounders
+            metric, baseline, observed, window_start, window_end, confounders,
+            decision_id=decision.id, file_path=decision.file_path,
+        )
+        if consequence is None:
+            continue
+        if persist:
+            consequence = await repo.insert_consequence(conn, consequence)
+        measured.append(consequence)
+    return measured
+
+
+async def measure_session_consequences(
+    conn: aiosqlite.Connection,
+    session: Session,
+    metrics: list[str],
+    *,
+    project_id: int,
+    window_days: int = DEFAULT_WINDOW_DAYS,
+    persist: bool = True,
+) -> list[Consequence]:
+    """Measure how metrics moved across and after an agent session.
+
+    The baseline is the metric before the session began; the observed value is
+    the latest scan from the session's end through the window. This is the
+    session-anchored twin of `measure_decision_consequences`, and the same
+    honesty holds: correlation never causation, None when unmeasurable, a
+    sub-noise move claims nothing.
+    """
+    if session.started_at is None or session.id is None:
+        return []
+
+    window_start = session.started_at
+    window_end = (session.ended_at or session.started_at) + timedelta(days=window_days)
+    confounders = await _confounders_in_window(
+        conn, window_start, window_end, project_id=project_id, exclude_id=None
+    )
+
+    measured: list[Consequence] = []
+    for metric in metrics:
+        baseline = await _score_before(conn, project_id, metric, window_start)
+        observed = await _score_within(conn, project_id, metric, window_start, window_end)
+        if baseline is None or observed is None:
+            continue
+        consequence = _build_consequence(
+            metric, baseline, observed, window_start, window_end, confounders,
+            session_id=session.id,
         )
         if consequence is None:
             continue

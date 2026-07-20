@@ -326,3 +326,74 @@ async def test_confounders_are_capped_with_a_truthful_remainder(db: Path):
     assert "more decision(s)" in c.confounders[-1]
     # Confidence reflects the TRUE count, not the truncated sample.
     assert c.confidence < 0.6 / MAX_CONFOUNDERS_LISTED
+
+
+# ---------------------------------------------------------------------------
+# 8.4 inconclusive-on-noise, and 8.2 the session path
+# ---------------------------------------------------------------------------
+
+
+async def test_a_move_within_noise_claims_nothing(db: Path):
+    """A sub-threshold move is not a correlation. The measurement is kept, but
+    causal_claim is 'none' and confidence is zero — followed-by-no-change is a
+    real finding, not a spurious link."""
+    async with get_connection(db) as conn:
+        pid = await _project(conn)
+        await _scan_with_score(conn, pid, _dt(1), "architecture", 60.0)
+        decision = await _decision(conn, _dt(10), project_id=pid)
+        await _scan_with_score(conn, pid, _dt(20), "architecture", 60.4)  # +0.4, within noise
+        c = await measure_consequence(conn, decision, "architecture", project_id=pid)
+    assert c is not None, "a measured non-move is still recorded"
+    assert c.delta == 0.4
+    assert c.causal_claim == "none"
+    assert c.confidence == 0.0
+
+
+async def test_a_move_past_the_noise_floor_is_a_correlation(db: Path):
+    async with get_connection(db) as conn:
+        pid = await _project(conn)
+        await _scan_with_score(conn, pid, _dt(1), "architecture", 60.0)
+        decision = await _decision(conn, _dt(10), project_id=pid)
+        await _scan_with_score(conn, pid, _dt(20), "architecture", 75.0)
+        c = await measure_consequence(conn, decision, "architecture", project_id=pid)
+    assert c.causal_claim == "correlation"
+
+
+async def test_the_session_path_measures_across_and_after_the_session(db: Path):
+    """8.2: a session's consequence is the metric before it began vs after it
+    ended, anchored on session_id — the twin of the decision path."""
+
+    from mri.fusion import measure_session_consequences
+    from mri.models.fusion import Session
+
+    async with get_connection(db) as conn:
+        pid = await _project(conn)
+        await _scan_with_score(conn, pid, _dt(1), "architecture", 50.0)   # before the session
+        session = await repo.upsert_session(conn, Session(
+            source="claude_code", external_id="s1", project_id=pid,
+            started_at=_dt(5), ended_at=_dt(9),
+        ))
+        await _scan_with_score(conn, pid, _dt(20), "architecture", 80.0)  # after it ended
+
+        results = await measure_session_consequences(conn, session, ["architecture"], project_id=pid)
+    assert len(results) == 1
+    c = results[0]
+    assert c.session_id == session.id
+    assert c.decision_id is None
+    assert c.baseline_value == 50.0 and c.observed_value == 80.0
+    assert c.delta == 30.0
+    assert c.causal_claim == "correlation"
+
+
+async def test_a_dateless_session_is_not_measurable(db: Path):
+    from mri.fusion import measure_session_consequences
+    from mri.models.fusion import Session
+
+    async with get_connection(db) as conn:
+        pid = await _project(conn)
+        await _scan_with_score(conn, pid, _dt(1), "architecture", 50.0)
+        session = await repo.upsert_session(conn, Session(
+            source="claude_code", external_id="s1", project_id=pid, started_at=None,
+        ))
+        results = await measure_session_consequences(conn, session, ["architecture"], project_id=pid)
+    assert results == []
