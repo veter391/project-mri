@@ -17,12 +17,15 @@ from mri.fusion.authorship import (
     weight_hotspots,
 )
 from mri.fusion.consequences import measure_consequence, measure_decision_consequences
+from mri.fusion.correlation import CorrelationResult, correlate_touches_to_commits
 from mri.fusion.decisions import ingest_adrs, ingest_commits, parse_adr
 
 __all__ = [
     "AuthorshipEvidence",
+    "CorrelationResult",
     "WeightedRisk",
     "authorship_evidence_for",
+    "correlate_touches_to_commits",
     "ingest_adrs",
     "ingest_commits",
     "measure_consequence",

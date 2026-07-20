@@ -47,7 +47,9 @@ __all__ = [
     "insert_session_event",
     "insert_session_file_touch",
     "replace_decisions_of_source",
+    "set_touch_commit",
     "touches_for_file",
+    "uncommitted_write_touches",
     "upsert_session",
 ]
 
@@ -345,6 +347,31 @@ async def insert_session_file_touch(
     )
     await conn.commit()
     return touch.model_copy(update={"id": int(cursor.lastrowid or 0)})
+
+
+async def uncommitted_write_touches(
+    conn: aiosqlite.Connection, project_id: int
+) -> list[SessionFileTouch]:
+    """Write/create touches in a project not yet linked to a commit and with a
+    time to correlate on. These are the input to session->commit correlation:
+    a read is not authorship, and a touch with no time cannot be placed against
+    commit history.
+    """
+    cursor = await conn.execute(
+        "SELECT * FROM session_file_touches"
+        " WHERE project_id = ? AND commit_sha IS NULL AND occurred_at IS NOT NULL"
+        "   AND touch_kind IN ('write', 'create', 'delete')"
+        " ORDER BY occurred_at",
+        (project_id,),
+    )
+    return [SessionFileTouch(**dict(r)) for r in await cursor.fetchall()]
+
+
+async def set_touch_commit(conn: aiosqlite.Connection, touch_id: int, commit_sha: str) -> None:
+    """Link one touch to the commit that materialised it."""
+    await conn.execute(
+        "UPDATE session_file_touches SET commit_sha = ? WHERE id = ?", (commit_sha, touch_id)
+    )
 
 
 async def touches_for_file(
