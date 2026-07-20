@@ -24,6 +24,7 @@ import aiosqlite
 
 from mri.db import fusion_repository as repo
 from mri.fusion.authorship import authorship_evidence_for
+from mri.utils import clean_text
 
 __all__ = ["Factor", "FileExplanation", "explain_file"]
 
@@ -66,6 +67,10 @@ async def explain_file(
     no clause rather than a fabricated one.
     """
     factors: list[Factor] = []
+    # The path is looked up raw but shown cleaned: a filename could carry a
+    # terminal escape or a bidi override on a POSIX host, and the prose is
+    # printed straight to an operator's terminal.
+    shown_path = clean_text(file_path)
 
     if base_risk is not None:
         factors.append(Factor(
@@ -150,4 +155,4 @@ async def explain_file(
                 conseq_values,
             ))
 
-    return FileExplanation(file_path=file_path, factors=factors)
+    return FileExplanation(file_path=shown_path, factors=factors)

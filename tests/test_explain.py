@@ -185,3 +185,13 @@ async def test_only_no_change_consequences_omit_the_causation_caveat(db: Path):
         exp = await explain_file(conn, "src/a.py", project_id=pid)
     assert "no discernible change" in exp.prose
     assert "correlation, not causation" not in exp.prose
+
+
+async def test_a_control_char_in_a_file_path_is_stripped_from_output(db: Path):
+    """A filename can carry a terminal escape on a POSIX host; the prose is
+    printed straight to a terminal, so the shown path is cleaned."""
+    async with get_connection(db) as conn:
+        pid = await _project(conn)
+        exp = await explain_file(conn, "src/a\x1b[31m.py", project_id=pid)
+    assert "\x1b" not in exp.prose
+    assert "\x1b" not in exp.file_path

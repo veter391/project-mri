@@ -272,3 +272,35 @@ def test_a_branch_that_looks_like_a_flag_is_refused():
 
     with pytest.raises(ValueError, match="invalid branch"):
         file_commit_history(_FakeRepo([]), branch="--output=/tmp/pwn")
+
+
+def test_file_commit_history_respects_max_count():
+    """A bound on the walk keeps a huge or hostile history from an unbounded read.
+    The -z fake honours -n so the parser sees only the capped commits."""
+    from mri.fusion.correlation import file_commit_history
+
+    class _CappingGit:
+        def __init__(self, commits):
+            self._commits = list(reversed(commits))
+
+        def log(self, *args):
+            n = None
+            for a in args:
+                if a.startswith("-n"):
+                    n = int(a[2:])
+            commits = self._commits[:n] if n is not None else self._commits
+            fields = []
+            for sha, iso, files in commits:
+                fields.append(f"{_MARK}{sha}{_SEP}{iso}\n{files[0]}")
+                fields.extend(files[1:])
+            return "\x00".join(fields) + "\x00"
+
+    class _Repo:
+        def __init__(self, commits):
+            self.git = _CappingGit(commits)
+
+    commits = [(f"c{i}", f"2026-05-{i + 1:02d}T00:00:00+00:00", ["a.py"]) for i in range(5)]
+    full = file_commit_history(_Repo(commits))
+    capped = file_commit_history(_Repo(commits), max_count=2)
+    assert len(full["a.py"]) == 5
+    assert len(capped["a.py"]) == 2, "the walk is bounded by max_count"

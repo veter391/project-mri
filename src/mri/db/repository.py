@@ -435,7 +435,7 @@ async def top_risk_files(
           AND s.id = (
               SELECT id FROM scans
               WHERE project_id = ? AND status = 'completed'
-              ORDER BY started_at DESC LIMIT 1
+              ORDER BY started_at DESC, id DESC LIMIT 1
           )
           AND f.target_path != '' AND f.target_path NOT LIKE '%/'
           AND f.score IS NOT NULL

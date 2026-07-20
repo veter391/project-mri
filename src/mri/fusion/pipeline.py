@@ -67,14 +67,26 @@ async def run_fusion(
     Every stage is scoped to `project_id`, and each is the audited layer beneath:
     this function sequences, it does not re-implement.
     """
+    import asyncio
+
+    from mri.fusion.correlation import file_commit_history
+
     report = FusionReport()
+
+    # Walk the commit history once, bounded, and share it across the stages that
+    # need it (correlation and commit->file linking) — otherwise a single run
+    # would walk the whole log twice, and unbounded. The bound is the same cap
+    # that limits commit ingest.
+    history = await asyncio.to_thread(
+        file_commit_history, git_repo, max_count=commit_max_count
+    )
 
     # 1. Sessions -> 2. their touches correlated to the commits that carried them.
     report.ingest = await ingest_workspace(
         conn, workspace, project_id=project_id, store_content=store_content, home=home
     )
     report.correlation = await correlate_touches_to_commits(
-        conn, git_repo, project_id=project_id
+        conn, git_repo, project_id=project_id, history=history
     )
 
     # 3. Decisions from ADRs and commits, then cross-source links, then commit
@@ -82,7 +94,7 @@ async def run_fusion(
     if adr_dir is not None:
         report.adrs = await ingest_adrs(conn, adr_dir, project_id=project_id)
     report.commits = await ingest_commits(
-        conn, git_repo, project_id=project_id, max_count=commit_max_count
+        conn, git_repo, project_id=project_id, max_count=commit_max_count, history=history
     )
     report.decision_links = await link_related_decisions(conn, project_id=project_id)
 

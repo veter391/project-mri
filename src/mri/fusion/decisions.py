@@ -30,6 +30,7 @@ import aiosqlite
 
 from mri.db import fusion_repository as repo
 from mri.models.fusion import Decision
+from mri.utils import clean_text
 
 logger = logging.getLogger(__name__)
 
@@ -68,20 +69,11 @@ MAX_ADR_FILES = 2_000
 MAX_ADR_BYTES = 2 * 1024 * 1024
 
 #: Commit subjects and ADR titles come from a repository that may be a hostile
-#: clone. They are text, not markup or control codes, so control characters,
-#: ANSI escapes and Unicode bidi overrides are stripped at ingest — that
-#: protects every consumer (terminal, report, JSON) at once and loses no real
-#: information. HTML-escaping is still the web surface's job at its render
+#: clone. They are stripped of terminal-control and bidi-override sequences at
+#: ingest via the shared cleaner, so every consumer (terminal, report, JSON) is
+#: protected at once. HTML-escaping is still the web surface's job at its render
 #: boundary; this is the layer below that, keeping the stored text plain.
-_CONTROL = re.compile(
-    r"\x1b\[[0-9;?]*[ -/]*[@-~]"   # ANSI CSI escape sequences
-    r"|[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]"  # C0 controls except tab/newline, and DEL
-    r"|[‪-‮⁦-⁩]"  # bidi embedding/override controls
-)
-
-
-def _clean(text: str) -> str:
-    return _CONTROL.sub("", text)
+_clean = clean_text
 
 
 _ADR_TITLE = re.compile(r"^#\s+(.*\S)\s*$", re.MULTILINE)
@@ -253,6 +245,7 @@ async def ingest_commits(
     branch: str = "HEAD",
     max_count: int = 2000,
     project_id: int | None = None,
+    history: dict[str, list[tuple[Any, str]]] | None = None,
 ) -> int:
     """Record commits as decisions, skipping any already stored.
 
@@ -264,7 +257,8 @@ async def ingest_commits(
     `max_count` bounds a first ingest of a deep history. If the walk hits that
     bound there may be older commits this run did not reach; that is logged
     rather than passing silently, because a silent cap reads as "we captured
-    everything" when we did not.
+    everything" when we did not. `history` may be a precomputed file->commits map
+    so a multi-stage caller walks the log once rather than per stage.
     """
     decisions = await asyncio.to_thread(_collect_commits, git_repo, branch, max_count, project_id)
     if len(decisions) == max_count:
@@ -273,13 +267,17 @@ async def ingest_commits(
             max_count,
         )
     written = await repo.insert_decisions_ignoring_duplicates(conn, decisions)
-    await _link_commit_files(conn, git_repo, branch, project_id, {d.commit_sha for d in decisions})
+    await _link_commit_files(
+        conn, git_repo, branch, project_id, {d.commit_sha for d in decisions},
+        history=history, max_count=max_count,
+    )
     return written
 
 
 async def _link_commit_files(
     conn: aiosqlite.Connection, git_repo: Any, branch: str,
     project_id: int | None, shas: set[str],
+    *, history: dict[str, list[tuple[Any, str]]] | None = None, max_count: int | None = None,
 ) -> None:
     """Link each commit decision to the files that commit changed, so a per-file
     view can reach the decisions behind it. Idempotent — re-linking is ignored.
@@ -299,7 +297,10 @@ async def _link_commit_files(
     if not wanted:
         return
 
-    history = await asyncio.to_thread(file_commit_history, git_repo, branch=branch)
+    if history is None:
+        history = await asyncio.to_thread(
+            file_commit_history, git_repo, branch=branch, max_count=max_count
+        )
     files_by_sha: dict[str, list[str]] = {}
     for path, commits in history.items():
         for _, sha in commits:

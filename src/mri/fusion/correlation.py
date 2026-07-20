@@ -64,13 +64,19 @@ def _validate_branch(branch: str) -> str:
     return branch
 
 
-def file_commit_history(git_repo: Any, *, branch: str = "HEAD") -> dict[str, list[tuple[datetime, str]]]:
+def file_commit_history(
+    git_repo: Any, *, branch: str = "HEAD", max_count: int | None = None
+) -> dict[str, list[tuple[datetime, str]]]:
     """Per file, the commits that changed it, ascending by author time.
 
     One `git log --name-only` rather than a diff per commit: the latter calls
     into git once for every commit and is the slow path this deliberately avoids.
     Author time (not commit time) is used, because it is when the change was
     written — the moment a touch should line up against.
+
+    `max_count` bounds the walk (`git log -n`), so a huge or hostile history
+    cannot turn one call into an unbounded blocking read. None means the full
+    history; a surface should pass a bound.
 
     `-z` (NUL-terminated) rather than the default line output: git's default
     `core.quotepath` wraps any non-ASCII, backslash or quote in a filename in
@@ -84,10 +90,11 @@ def file_commit_history(git_repo: Any, *, branch: str = "HEAD") -> dict[str, lis
     is newest-first, so the earlier-committed of a tie has the higher stream
     index — the sort key uses `-index` to bring it first.
     """
-    raw = git_repo.git.log(
-        f"--pretty=format:{_MARK}%H{_SEP}%aI", "--name-only", "--no-renames", "-z",
-        _validate_branch(branch),
-    )
+    args = [f"--pretty=format:{_MARK}%H{_SEP}%aI", "--name-only", "--no-renames", "-z"]
+    if max_count is not None:
+        args.append(f"-n{int(max_count)}")
+    args.append(_validate_branch(branch))
+    raw = git_repo.git.log(*args)
     history: dict[str, list[tuple[datetime, int, str]]] = {}
     sha = ""
     when: datetime | None = None
@@ -133,14 +140,23 @@ def _first_commit_at_or_after(
 
 
 async def correlate_touches_to_commits(
-    conn: aiosqlite.Connection, git_repo: Any, *, project_id: int, branch: str = "HEAD"
+    conn: aiosqlite.Connection, git_repo: Any, *, project_id: int, branch: str = "HEAD",
+    history: dict[str, list[tuple[datetime, str]]] | None = None,
+    max_count: int | None = None,
 ) -> CorrelationResult:
     """Link a project's uncommitted write touches to the commits that materialised
     them. Idempotent: only touches without a commit_sha are considered, so
     re-running after new commits links what has since become committable and
     leaves the rest.
+
+    `history` may be a precomputed file->commits map (from `file_commit_history`),
+    so a caller running several fusion stages walks the log once instead of per
+    stage. When omitted it is built here, bounded by `max_count`.
     """
-    history = await asyncio.to_thread(file_commit_history, git_repo, branch=branch)
+    if history is None:
+        history = await asyncio.to_thread(
+            file_commit_history, git_repo, branch=branch, max_count=max_count
+        )
     touches = await repo.uncommitted_write_touches(conn, project_id)
 
     # Each file's ascending time list is built once, not once per touch on it —
