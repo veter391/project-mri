@@ -22,7 +22,7 @@ from mri.fusion.consequences import (
     measure_session_consequences,
 )
 from mri.fusion.correlation import CorrelationResult, correlate_touches_to_commits
-from mri.fusion.decisions import ingest_adrs, ingest_commits, parse_adr
+from mri.fusion.decisions import ingest_adrs, ingest_commits, link_related_decisions, parse_adr
 from mri.fusion.explain import Factor, FileExplanation, explain_file
 from mri.fusion.line_authorship import compute_file_authorship, persist_file_authorship
 
@@ -38,6 +38,7 @@ __all__ = [
     "explain_file",
     "ingest_adrs",
     "ingest_commits",
+    "link_related_decisions",
     "measure_consequence",
     "measure_decision_consequences",
     "measure_session_consequences",

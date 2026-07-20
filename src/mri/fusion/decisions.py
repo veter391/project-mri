@@ -36,8 +36,19 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "ingest_adrs",
     "ingest_commits",
+    "link_related_decisions",
     "parse_adr",
 ]
+
+#: An ADR reference in a commit message: "ADR-5", "ADR 005", "adr-42". The
+#: number is normalised to an int so leading zeros do not matter.
+_ADR_REF = re.compile(r"\bADR[-\s]?0*(\d{1,4})\b", re.IGNORECASE)
+#: A commit sha cited in an ADR body: 7-40 hex chars. Only links if it actually
+#: prefixes a stored commit sha, so a hex-looking word that is not a real commit
+#: produces no link.
+_SHA_REF = re.compile(r"\b([0-9a-f]{7,40})\b")
+#: The ADR number embedded in an ADR's own source_ref/summary ("ADR-005-...").
+_ADR_NUMBER = re.compile(r"ADR[-\s]?0*(\d{1,4})", re.IGNORECASE)
 
 #: An ADR is a deliberate decision record — the strongest provenance we have —
 #: but a record can be stale, so never certainty.
@@ -328,3 +339,52 @@ def _collect_commits(
     return [
         _commit_decision(c, project_id) for c in git_repo.iter_commits(branch, max_count=max_count)
     ]
+
+
+async def link_related_decisions(conn: aiosqlite.Connection, *, project_id: int) -> int:
+    """Link an ADR and a commit that describe the same decision.
+
+    Only *explicit* cross-references make a link — a commit message naming an ADR
+    ("see ADR-005"), or an ADR body naming a commit sha. Fuzzy text similarity is
+    deliberately not used: guessing that two decisions are "the same" and merging
+    them would fabricate a relationship, and a wrong merge of two real decisions
+    is the exact failure this product refuses. The two rows are kept distinct and
+    linked, not merged, so each keeps its own rationale and confidence.
+
+    Idempotent — re-running only adds links that are newly derivable.
+    """
+    cursor = await conn.execute(
+        "SELECT id, source, source_ref, summary, rationale, commit_sha FROM decisions"
+        " WHERE project_id IS ?",
+        (project_id,),
+    )
+    rows = await cursor.fetchall()
+
+    adr_by_number: dict[int, int] = {}
+    commit_by_sha: list[tuple[str, int]] = []
+    for did, source, source_ref, _summary, _rationale, commit_sha in rows:
+        if source == "adr":
+            m = _ADR_NUMBER.search(source_ref or "") or _ADR_NUMBER.search(_summary or "")
+            if m:
+                adr_by_number[int(m.group(1))] = int(did)
+        elif source == "commit" and commit_sha:
+            commit_by_sha.append((str(commit_sha), int(did)))
+
+    links = 0
+    for did, source, _source_ref, summary, rationale, _commit_sha in rows:
+        text = f"{summary or ''}\n{rationale or ''}"
+        if source == "commit":
+            for m in _ADR_REF.finditer(text):
+                adr_id = adr_by_number.get(int(m.group(1)))
+                if adr_id is not None and adr_id != did:
+                    if await repo.insert_decision_link(conn, int(did), adr_id, project_id, "commit_names_adr"):
+                        links += 1
+        elif source == "adr":
+            cited = {c.lower() for c in _SHA_REF.findall(text.lower())}
+            for sha, commit_id in commit_by_sha:
+                if commit_id == did:
+                    continue
+                if any(sha.startswith(ref) or ref.startswith(sha) for ref in cited):
+                    if await repo.insert_decision_link(conn, int(did), commit_id, project_id, "adr_names_commit"):
+                        links += 1
+    return links

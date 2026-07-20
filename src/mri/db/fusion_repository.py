@@ -46,8 +46,10 @@ __all__ = [
     "insert_decision",
     "insert_decisions_ignoring_duplicates",
     "insert_session_event",
+    "insert_decision_link",
     "insert_session_file_touch",
     "link_decision_files",
+    "related_decisions",
     "replace_decisions_of_source",
     "set_touch_commit",
     "touches_for_file",
@@ -538,6 +540,39 @@ async def decisions_for_file(
         "SELECT * FROM decisions WHERE project_id = ? AND file_path = ?"
         " ORDER BY decided_at DESC LIMIT ?",
         (project_id, file_path, _limit(limit)),
+    )
+    return [Decision(**dict(r)) for r in await cursor.fetchall()]
+
+
+async def insert_decision_link(
+    conn: aiosqlite.Connection, decision_id: int, related_decision_id: int,
+    project_id: int | None, relation: str,
+) -> bool:
+    """Record that two decisions describe the same choice. Idempotent, and a
+    self-link is impossible (the CHECK enforces it). Returns True only when a
+    new link was actually written, so a caller can count real links rather than
+    attempts."""
+    if decision_id == related_decision_id:
+        return False
+    cursor = await conn.execute(
+        "INSERT OR IGNORE INTO decision_links"
+        " (decision_id, related_decision_id, project_id, relation) VALUES (?, ?, ?, ?)",
+        (decision_id, related_decision_id, project_id, relation),
+    )
+    await conn.commit()
+    return bool(cursor.rowcount)
+
+
+async def related_decisions(
+    conn: aiosqlite.Connection, decision_id: int, *, project_id: int
+) -> list[Decision]:
+    """Decisions linked to this one as the same choice, either direction."""
+    cursor = await conn.execute(
+        "SELECT * FROM decisions WHERE project_id = ? AND id IN ("
+        "  SELECT related_decision_id FROM decision_links WHERE decision_id = ?"
+        "  UNION SELECT decision_id FROM decision_links WHERE related_decision_id = ?)"
+        " ORDER BY decided_at DESC",
+        (project_id, decision_id, decision_id),
     )
     return [Decision(**dict(r)) for r in await cursor.fetchall()]
 
