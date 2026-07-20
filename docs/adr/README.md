@@ -18,6 +18,7 @@ decision, and what it costs — including decisions that were later superseded.
 | [011](ADR-011-base-risk-composition.md) | Provenance is not folded into risk; authorship-weighted risk is a bounded triage signal | Accepted |
 | [012](ADR-012-session-reasoning-mining-deferred.md) | Reasoning-to-rationale mining deferred; citation-linking is the verifiable slice | Accepted |
 | [013](ADR-013-auth-posture-fail-closed-local-first.md) | Auth posture: loopback trusted, non-loopback fails closed (supersedes H2 "auth-on everywhere") | Accepted |
+| [014](ADR-014-mcp-stdio-transport.md) | MCP is stdio-transport (local), not a networked FastAPI service; HTTP route carries the auth-gated networked reads | Accepted |
 
 ## Conventions
 

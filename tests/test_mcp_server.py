@@ -56,10 +56,17 @@ def _seed(db: Path, project_dir: Path) -> str:
             " VALUES (?, 'app.py', 88, 0, 12, 'blame_session_commit', 0.9)",
             (pid,),
         )
-        conn.execute(
+        did = conn.execute(
             "INSERT INTO decisions (summary, source, project_id, file_path, confidence)"
             " VALUES ('switch to async', 'adr', ?, 'app.py', 0.95)",
             (pid,),
+        ).lastrowid
+        conn.execute(
+            "INSERT INTO consequences (decision_id, metric, file_path,"
+            " window_start, window_end, delta, causal_claim, confidence)"
+            " VALUES (?, 'complexity', 'app.py', '2026-01-01', '2026-02-01', 12.0,"
+            " 'correlation', 0.4)",
+            (did,),
         )
         conn.commit()
     finally:
@@ -103,7 +110,10 @@ async def test_tools_are_listed_and_callable_over_the_protocol(tmp_path: Path):
         await client.initialize()
 
         tools = {t.name for t in (await client.list_tools()).tools}
-        assert {"fuse_project", "explain_file", "get_authorship", "get_decisions"} <= tools
+        assert {
+            "fuse_project", "explain_file", "get_authorship",
+            "get_decisions", "get_consequences",
+        } <= tools
 
         # explain_file returns the signature sentence through the protocol.
         r = await client.call_tool("explain_file", {"project_path": project_path, "file_path": "app.py"})
@@ -122,6 +132,13 @@ async def test_tools_are_listed_and_callable_over_the_protocol(tmp_path: Path):
         r = await client.call_tool("get_decisions", {"project_path": project_path, "file_path": "app.py"})
         payload = json.loads(_text(r))
         assert payload["decisions"][0]["summary"] == "switch to async"
+
+        # get_consequences returns what followed those decisions, labelled honestly.
+        r = await client.call_tool("get_consequences", {"project_path": project_path, "file_path": "app.py"})
+        payload = json.loads(_text(r))
+        assert payload["consequences"][0]["metric"] == "complexity"
+        assert payload["consequences"][0]["claim"] == "correlation"
+        assert payload["consequences"][0]["decision"] == "switch to async"
 
 
 async def test_authorship_of_an_uncomputed_file_is_an_honest_unknown(tmp_path: Path):

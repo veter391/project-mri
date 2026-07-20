@@ -180,4 +180,32 @@ def build_server(db_path: Path | None = None) -> Any:
             ],
         }
 
+    @server.tool()
+    async def get_consequences(project_path: str, file_path: str) -> dict:
+        """The measured changes that FOLLOWED the decisions touching a file — each
+        with the metric that moved, its delta, the alternative explanations
+        (confounders), and a confidence below one. Labelled 'correlation' or 'no
+        discernible change', never 'causation': this is what happened after, not
+        proof the decision caused it."""
+        from mri.db import fusion_repository as repo
+
+        shown = clean_text(file_path)
+        rows: list[dict] = []
+        async with get_connection(resolved_db) as conn:
+            pid = await _existing_project_id(conn, project_path)
+            if pid is not None:
+                for d in await repo.decisions_affecting_file(conn, file_path, project_id=pid):
+                    if d.id is None:
+                        continue
+                    for c in await repo.consequences_for_decision(conn, d.id, project_id=pid):
+                        rows.append({
+                            "decision": d.summary,
+                            "metric": c.metric,
+                            "delta": c.delta,
+                            "claim": c.causal_claim,
+                            "confidence": c.confidence,
+                            "confounders": c.confounders,
+                        })
+        return {"file": shown, "consequences": rows}
+
     return server

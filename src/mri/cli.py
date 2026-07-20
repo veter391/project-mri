@@ -350,9 +350,10 @@ def eval_cmd(json_out: str | None) -> None:
 def mcp() -> None:
     """Serve MRI's fusion tools to coding agents over MCP (stdio transport).
 
-    Exposes fuse_project, explain_file, get_authorship and get_decisions so an
-    agent can ask who authored a file and what decided it, mid-task. Needs the
-    optional MCP dependency: `pip install project-mri[mcp]`.
+    Exposes fuse_project, explain_file, get_authorship, get_decisions and
+    get_consequences so an agent can ask who authored a file, what decided it,
+    and what changed after — mid-task. Needs the optional MCP dependency:
+    `pip install project-mri[mcp]`.
     """
     # build_server defers the optional `mcp` import, so a missing dependency
     # surfaces as a ModuleNotFoundError here, not at module import time.
@@ -740,7 +741,10 @@ def ui(host: str | None, port: int | None, no_serve: bool) -> None:
     if not no_serve:
         threading.Thread(target=_open_later, daemon=True).start()
         click.echo(f"→ opening {url}", err=True)
-        serve.callback(host=host, port=port, reload=False)  # type: ignore[attr-defined]
+        serve_callback = serve.callback
+        if serve_callback is None:  # pragma: no cover - a decorated command always has one
+            raise RuntimeError("serve command has no callback")
+        serve_callback(host=host, port=port, reload=False)
     else:
         click.echo(f"  Open: {url}", err=True)
         webbrowser.open(url)
