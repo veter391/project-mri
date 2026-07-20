@@ -23,15 +23,19 @@ from mri.fusion.consequences import (
 )
 from mri.fusion.correlation import CorrelationResult, correlate_touches_to_commits
 from mri.fusion.decisions import ingest_adrs, ingest_commits, parse_adr
+from mri.fusion.explain import Factor, FileExplanation, explain_file
 from mri.fusion.line_authorship import compute_file_authorship, persist_file_authorship
 
 __all__ = [
     "AuthorshipEvidence",
     "CorrelationResult",
+    "Factor",
+    "FileExplanation",
     "WeightedRisk",
     "authorship_evidence_for",
     "compute_file_authorship",
     "correlate_touches_to_commits",
+    "explain_file",
     "ingest_adrs",
     "ingest_commits",
     "measure_consequence",
