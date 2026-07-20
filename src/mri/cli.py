@@ -166,9 +166,12 @@ def scan(project_path: str, branch: str | None, output: str, json_out: str | Non
 
         out = Path(output).resolve()
         files = write_report_files(report, out.parent)
-        # Rename to user-specified path
+        # Move to the user-specified path. Use replace(), not rename(): on Windows
+        # Path.rename raises FileExistsError when the target already exists, so a
+        # second `mri scan` to the same output path would crash. replace() is the
+        # atomic cross-platform overwrite.
         if str(out) != str(files["html"]):
-            files["html"].rename(out)
+            files["html"].replace(out)
         if json_out:
             Path(json_out).write_text(render_json(report), encoding="utf-8")
 
