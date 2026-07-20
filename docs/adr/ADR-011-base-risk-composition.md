@@ -54,10 +54,12 @@ tested primitive live:
   risk, omitted when it rounds to zero (no evidence to weight is not a fact worth
   stating). All three surfaces (CLI, HTTP, MCP) get it, since all call
   `explain_file`.
-- The fusion pipeline orders the files it explains by that weighted risk, so the
-  moat view leads with the file whose risk most sits under agent-modified code.
-  Files with no such evidence are kept, ordered last, never dropped — the
-  top-N selection was already made upstream by `top_risk_files`.
+- Every surface orders the files it explains by that weighted risk — the fusion
+  pipeline (CLI, MCP) and the HTTP route alike — so the moat view leads with the
+  file whose risk most sits under agent-modified code, and the same project shows
+  the same leading file whichever surface asked. Files with no such evidence are
+  kept, ordered last, never dropped — the top-N selection was already made
+  upstream by `top_risk_files`.
 - The formula lives in one place, `weighted_risk_of`, shared by the per-file
   explanation and the batch `weight_hotspots` ordering, so the ≤-base invariant
   cannot drift between them.

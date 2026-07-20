@@ -143,6 +143,51 @@ def test_the_endpoint_is_project_scoped(client: TestClient, db_path: Path):
     assert "10% of its current lines" in prose_b
 
 
+def test_the_endpoint_leads_with_the_agent_attributable_file(client: TestClient, db_path: Path):
+    """The HTTP surface orders by authorship-weighted risk like the CLI and MCP
+    (ADR-011): an agent-written file at base risk 60 leads an untouched one at
+    base risk 95, so a user diffing the API against `mri fusion` sees the same
+    top file. Both are still returned."""
+    conn = connect_sync(db_path)
+    try:
+        pid = conn.execute(
+            "INSERT INTO projects (path, name, default_branch) VALUES ('/o', 'ord', 'HEAD')"
+        ).lastrowid
+        sid = conn.execute(
+            "INSERT INTO scans (project_id, scan_uuid, status) VALUES (?, 'u1', 'completed')",
+            (pid,),
+        ).lastrowid
+        rid = conn.execute(
+            "INSERT INTO analyzer_runs (scan_id, analyzer_name, status, score_value, score_label)"
+            " VALUES (?, 'git_history', 'completed', 50, 'g')",
+            (sid,),
+        ).lastrowid
+        for path, score in (("touched.py", 60.0), ("untouched.py", 95.0)):
+            conn.execute(
+                "INSERT INTO findings (run_id, analyzer_name, severity, category, title,"
+                " target_path, score) VALUES (?, 'git_history', 'high', 'hotspot', 'x', ?, ?)",
+                (rid, path, score),
+            )
+        session_id = conn.execute(
+            "INSERT INTO sessions (source, external_id, project_id) VALUES ('claude_code', 's1', ?)",
+            (pid,),
+        ).lastrowid
+        # A write touch only on the lower-base-risk file: it gets evidence
+        # strength 0.9 (weighted 54), the untouched file weights to 0.
+        conn.execute(
+            "INSERT INTO session_file_touches (session_id, project_id, file_path, touch_kind,"
+            " confidence, occurred_at) VALUES (?, ?, 'touched.py', 'write', 0.9, '2026-05-01T10:00:00Z')",
+            (session_id, pid),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    files = client.get(f"/api/projects/{pid}/fusion").json()["files"]
+    order = [f["file"] for f in files]
+    assert order == ["touched.py", "untouched.py"], "agent-attributable risk leads; both present"
+
+
 def test_top_is_bounded(client: TestClient, db_path: Path):
     pid = _seed_project_with_fusion(db_path)
     assert client.get(f"/api/projects/{pid}/fusion?top=0").status_code == 422

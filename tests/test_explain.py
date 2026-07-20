@@ -212,6 +212,18 @@ async def test_weighted_risk_is_absent_without_agent_evidence(db: Path):
     assert "agent-modified code" not in exp.prose
 
 
+async def test_a_negative_base_risk_is_refused_consistently(db: Path):
+    """The 0..100 invariant is enforced once, so it holds for every base_risk
+    path — not fatal for a file with write evidence and silently tolerated for
+    one without (the inconsistency the 6.1 audit flagged)."""
+    async with get_connection(db) as conn:
+        pid = await _project(conn)
+        # No agent evidence: the risk factor is the only base_risk consumer, and
+        # it must still refuse a negative rather than print "risk -5/100".
+        with pytest.raises(ValueError, match="non-negative"):
+            await explain_file(conn, "src/no_evidence.py", project_id=pid, base_risk=-5.0)
+
+
 async def test_a_control_char_in_a_file_path_is_stripped_from_output(db: Path):
     """A filename can carry a terminal escape on a POSIX host; the prose is
     printed straight to a terminal, so the shown path is cleaned."""

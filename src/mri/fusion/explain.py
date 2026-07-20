@@ -72,7 +72,14 @@ async def explain_file(
     # printed straight to an operator's terminal.
     shown_path = clean_text(file_path)
 
+    # Risk scores are 0..100 by construction (analyzer findings are clamped). A
+    # negative one is a caller bug; reject it once here so every factor derived
+    # from base_risk — the plain risk line and the weighted-risk line below —
+    # enforces the same invariant, rather than one failing loudly and the other
+    # emitting a nonsensical "risk -5/100".
     if base_risk is not None:
+        if base_risk < 0:
+            raise ValueError(f"base risk must be non-negative; got {base_risk} for {shown_path}")
         factors.append(Factor(
             "risk", f"risk {round(base_risk)}/100.", round(base_risk, 2),
         ))

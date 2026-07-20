@@ -16,7 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from mri.api.deps import db_conn
 from mri.db.repository import top_risk_files
-from mri.fusion import explain_file
+from mri.fusion import explain_file, weight_hotspots
 
 router = APIRouter(prefix="/api", tags=["fusion"])
 
@@ -40,9 +40,14 @@ async def project_fusion(
         raise HTTPException(404, "project not found")
 
     hotspots = await top_risk_files(conn, project_id, limit=top)
+    # Order by the risk that sits under agent-modified code, matching the CLI and
+    # MCP surfaces (ADR-011): a user diffing this API against `mri fusion` for the
+    # same project must see the same leading file. weight_hotspots is a pure DB
+    # read of the same cost class as the per-file explain below — no heavy git in
+    # the request path — and returns every hotspot, just reordered.
     files = []
-    for path, base_risk in hotspots.items():
-        exp = await explain_file(conn, path, project_id=project_id, base_risk=base_risk)
+    for wr in await weight_hotspots(conn, hotspots, project_id=project_id):
+        exp = await explain_file(conn, wr.file_path, project_id=project_id, base_risk=wr.base_risk)
         files.append({
             "file": exp.file_path,
             "prose": exp.prose,
