@@ -37,6 +37,7 @@ __all__ = [
     "insert_session_events",
     "insert_session_file_touches",
     "consequences_for_decision",
+    "decisions_affecting_file",
     "decisions_for_file",
     "events_for_session",
     "get_session",
@@ -46,6 +47,7 @@ __all__ = [
     "insert_decisions_ignoring_duplicates",
     "insert_session_event",
     "insert_session_file_touch",
+    "link_decision_files",
     "replace_decisions_of_source",
     "set_touch_commit",
     "touches_for_file",
@@ -536,6 +538,40 @@ async def decisions_for_file(
         "SELECT * FROM decisions WHERE project_id = ? AND file_path = ?"
         " ORDER BY decided_at DESC LIMIT ?",
         (project_id, file_path, _limit(limit)),
+    )
+    return [Decision(**dict(r)) for r in await cursor.fetchall()]
+
+
+async def link_decision_files(
+    conn: aiosqlite.Connection, decision_id: int, project_id: int | None, file_paths: list[str]
+) -> None:
+    """Record the files a decision concerns (a commit changes many). Idempotent
+    via the (decision_id, file_path) unique key, so re-linking is a no-op."""
+    if not file_paths:
+        return
+    await conn.executemany(
+        "INSERT OR IGNORE INTO decision_files (decision_id, project_id, file_path)"
+        " VALUES (?, ?, ?)",
+        [(decision_id, project_id, path) for path in file_paths],
+    )
+    await conn.commit()
+
+
+async def decisions_affecting_file(
+    conn: aiosqlite.Connection, file_path: str, *, project_id: int, limit: int = 50
+) -> list[Decision]:
+    """Decisions that concern a file, by its own `file_path` (an ADR naming it)
+    or by a `decision_files` link (a commit that changed it). The union is what
+    the per-file explanation needs — a commit's decision reaches its files
+    through the link table, an ADR's through the column."""
+    cursor = await conn.execute(
+        "SELECT d.* FROM decisions d"
+        " WHERE d.project_id = ? AND ("
+        "   d.file_path = ?"
+        "   OR d.id IN (SELECT decision_id FROM decision_files"
+        "               WHERE project_id = ? AND file_path = ?))"
+        " ORDER BY d.decided_at DESC LIMIT ?",
+        (project_id, file_path, project_id, file_path, _limit(limit)),
     )
     return [Decision(**dict(r)) for r in await cursor.fetchall()]
 

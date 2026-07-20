@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from mri.db import fusion_repository as repo
 from mri.db.migrator import migrate
 from mri.db.repository import get_connection
 from mri.fusion import ingest_adrs, parse_adr
@@ -149,9 +150,14 @@ async def test_ingest_commits_is_idempotent(db: Path):
 
     from mri.fusion.decisions import ingest_commits
 
+    class _FakeGit:
+        def log(self, *args):  # noqa: ARG002 - no changed-file history in this fake
+            return ""
+
     class _FakeRepo:
         def __init__(self, commits):
             self._commits = commits
+            self.git = _FakeGit()
 
         def iter_commits(self, branch, max_count):  # noqa: ARG002
             return iter(self._commits[:max_count])
@@ -333,3 +339,78 @@ async def test_ingest_the_real_repo_adrs(db: Path):
         cur = await conn.execute("SELECT source_ref, rationale FROM decisions WHERE source='adr'")
         for ref, rationale in await cur.fetchall():
             assert rationale, f"{ref} lost its rationale"
+
+
+# ---------------------------------------------------------------------------
+# 7.1 decision -> file linkage
+# ---------------------------------------------------------------------------
+
+
+async def test_decisions_affecting_file_unions_column_and_link(db: Path):
+    """A file's decisions come from an ADR that names it (the file_path column)
+    and from a commit that changed it (the decision_files link) — the union is
+    what the per-file view needs."""
+    from mri.models.fusion import Decision
+
+    async with get_connection(db) as conn:
+        pid = int((await conn.execute("INSERT INTO projects (name, path) VALUES ('p','/p')")).lastrowid)
+        await conn.commit()
+        await repo.insert_decision(conn, Decision(
+            summary="use SQLite", source="adr", source_ref="ADR-1.md",
+            project_id=pid, file_path="src/db.py",
+        ))
+        commit = await repo.insert_decision(conn, Decision(
+            summary="refactor db layer", source="commit", source_ref="abc123",
+            project_id=pid, commit_sha="abc123",
+        ))
+        await repo.link_decision_files(conn, commit.id, pid, ["src/db.py", "src/other.py"])
+
+        found = {d.summary for d in await repo.decisions_affecting_file(conn, "src/db.py", project_id=pid)}
+    assert found == {"use SQLite", "refactor db layer"}, "both the ADR (column) and the commit (link)"
+
+
+async def test_link_is_idempotent_and_project_scoped(db: Path):
+    from mri.models.fusion import Decision
+
+    async with get_connection(db) as conn:
+        a = int((await conn.execute("INSERT INTO projects (name, path) VALUES ('a','/a')")).lastrowid)
+        b = int((await conn.execute("INSERT INTO projects (name, path) VALUES ('b','/b')")).lastrowid)
+        await conn.commit()
+        d = await repo.insert_decision(conn, Decision(
+            summary="x", source="commit", source_ref="s", project_id=a, commit_sha="s"))
+        await repo.link_decision_files(conn, d.id, a, ["src/x.py"])
+        await repo.link_decision_files(conn, d.id, a, ["src/x.py"])  # idempotent
+        cur = await conn.execute("SELECT count(*) FROM decision_files")
+        assert (await cur.fetchone())[0] == 1, "re-linking the same file is a no-op"
+        # project B does not see A's link
+        assert await repo.decisions_affecting_file(conn, "src/x.py", project_id=b) == []
+
+
+async def test_ingest_commits_links_each_commits_changed_files(db: Path):
+    """After commit ingest, a file changed by a commit resolves to that commit's
+    decision through the link table."""
+    import subprocess
+    import tempfile
+
+    import git
+
+    from mri.fusion import ingest_commits
+
+    d = Path(tempfile.mkdtemp())
+
+    def gitc(*a):
+        subprocess.run(["git", *a], cwd=d, capture_output=True)
+
+    gitc("init", "-q")
+    gitc("config", "user.email", "t@t")
+    gitc("config", "user.name", "t")
+    (d / "a.py").write_text("x\n", encoding="utf-8")
+    gitc("add", "-A")
+    gitc("commit", "-qm", "add a.py")
+
+    async with get_connection(db) as conn:
+        pid = int((await conn.execute("INSERT INTO projects (name, path) VALUES ('p', ?)", (str(d),))).lastrowid)
+        await conn.commit()
+        await ingest_commits(conn, git.Repo(d), project_id=pid)
+        decisions = await repo.decisions_affecting_file(conn, "a.py", project_id=pid)
+    assert [x.summary for x in decisions] == ["add a.py"], "the commit that changed a.py reaches it"

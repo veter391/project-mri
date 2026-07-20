@@ -244,7 +244,33 @@ async def ingest_commits(
             "commit ingest hit the max_count of %d; commits older than that were not walked",
             max_count,
         )
-    return await repo.insert_decisions_ignoring_duplicates(conn, decisions)
+    written = await repo.insert_decisions_ignoring_duplicates(conn, decisions)
+    await _link_commit_files(conn, git_repo, branch, project_id, {d.commit_sha for d in decisions})
+    return written
+
+
+async def _link_commit_files(
+    conn: aiosqlite.Connection, git_repo: Any, branch: str,
+    project_id: int | None, shas: set[str | None],
+) -> None:
+    """Link each commit decision to the files that commit changed, so a per-file
+    view can reach the decisions behind it. Idempotent — re-linking is ignored."""
+    from mri.fusion.correlation import file_commit_history
+
+    history = await asyncio.to_thread(file_commit_history, git_repo, branch=branch)
+    files_by_sha: dict[str, list[str]] = {}
+    for path, commits in history.items():
+        for _, sha in commits:
+            files_by_sha.setdefault(sha, []).append(path)
+
+    cursor = await conn.execute(
+        "SELECT id, commit_sha FROM decisions"
+        " WHERE source = 'commit' AND commit_sha IS NOT NULL AND project_id IS ?",
+        (project_id,),
+    )
+    for decision_id, sha in await cursor.fetchall():
+        if sha in shas or shas == {None}:
+            await repo.link_decision_files(conn, int(decision_id), project_id, files_by_sha.get(sha, []))
 
 
 def _collect_commits(
