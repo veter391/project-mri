@@ -73,5 +73,40 @@ export const login = (username: string, password: string) =>
 
 export const listScans = () => api<ScanListResponse>("/scans?limit=20");
 export const listProjects = () => api<ProjectListResponse>("/projects?limit=50");
+
+// GET /api/scans/{uuid} returns response_model=dict, so it is not in the
+// generated schema — typed here to the fields the detail view reads.
+export interface ScanFinding {
+  severity: string;
+  category: string;
+  title: string;
+  description?: string;
+  target_path?: string;
+  score?: number | null;
+}
+// A per-analyzer run inside the stored report (populated for every completed
+// scan, unlike the top-level analyzer_runs table which only the API scan path
+// fills). Score is null when the analyzer could not measure.
+export interface ScanReportRun {
+  name: string;
+  status: string;
+  score: { value: number | null; label: string; band: string } | null;
+  findings: unknown[];
+}
+export interface ScanDetail {
+  scan_uuid: string;
+  project_name: string;
+  status: string;
+  started_at: string;
+  finished_at?: string | null;
+  error_message?: string | null;
+  report?: {
+    overall_health: number;
+    overall_band: string;
+    findings: ScanFinding[];
+    runs: ScanReportRun[];
+  };
+}
+export const getScan = (uuid: string) => api<ScanDetail>(`/scans/${uuid}`);
 export const getFusion = (projectId: number, top = 25) =>
   api<FusionResponse>(`/projects/${projectId}/fusion?top=${top}`);

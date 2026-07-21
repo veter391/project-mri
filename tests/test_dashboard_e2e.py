@@ -189,3 +189,78 @@ class TestDashboardE2E:
         expect(page.get_by_role("button", name="sign out")).to_be_visible(timeout=15_000)
         page.get_by_role("button", name="sign out").click()
         expect(page.get_by_role("heading", name="Sign in")).to_be_visible(timeout=15_000)
+
+
+def _build_scan_repo(path: Path) -> None:
+    import subprocess as sp
+
+    path.mkdir(parents=True, exist_ok=True)
+    for cmd in (["init", "-q"], ["config", "user.email", "t@t"], ["config", "user.name", "t"]):
+        sp.run(["git", *cmd], cwd=path, capture_output=True, check=False)
+    (path / "app.py").write_text("def a():\n    return 1\n", encoding="utf-8")
+    sp.run(["git", "add", "-A"], cwd=path, capture_output=True, check=False)
+    sp.run(["git", "commit", "-qm", "init"], cwd=path, capture_output=True, check=False)
+
+
+@pytest.fixture(scope="module")
+def server_with_scan(tmp_path_factory) -> str:
+    """A server whose DB already holds one completed scan, so the scan-detail
+    drill-in has real data to show."""
+    tmp = tmp_path_factory.mktemp("dash-scan")
+    env = os.environ.copy()
+    env["MRI_DB"] = str(tmp / "test.db")
+    env["MRI_LOG_LEVEL"] = "WARNING"
+
+    init = subprocess.run(
+        [sys.executable, "-m", "mri.cli", "init",
+         "--username", ADMIN_USER, "--password", ADMIN_PASS, "--yes"],
+        capture_output=True, env=env,
+    )
+    if init.returncode != 0:
+        pytest.skip(f"mri init failed: {init.stderr.decode(errors='ignore')}")
+
+    repo = tmp / "repo"
+    _build_scan_repo(repo)
+    scan = subprocess.run(
+        [sys.executable, "-m", "mri.cli", "scan", str(repo), "-q", "-o", str(tmp / "r.html")],
+        capture_output=True, env=env,
+    )
+    if scan.returncode != 0:
+        pytest.skip(f"mri scan failed: {scan.stderr.decode(errors='ignore')}")
+
+    port = _free_port()
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "uvicorn", "mri.api.app:app", "--port", str(port), "--log-level", "warning"],
+        env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    base_url = f"http://127.0.0.1:{port}"
+    import httpx
+
+    for _ in range(40):
+        try:
+            httpx.get(f"{base_url}/api/health", timeout=1)
+            break
+        except Exception:
+            time.sleep(0.25)
+    else:
+        _stop(proc)
+        pytest.skip("server did not start")
+    yield base_url
+    _stop(proc)
+
+
+class TestScanDetailE2E:
+    def test_clicking_a_scan_opens_its_detail(self, server_with_scan: str, page: Page):
+        _login(page, server_with_scan)
+        # The overview lists the scan; its project name is a button into the detail.
+        row_button = page.get_by_role("button", name="repo")
+        expect(row_button).to_be_visible(timeout=15_000)
+        row_button.click()
+        expect(page.get_by_role("heading", name="analyzers")).to_be_visible(timeout=15_000)
+        expect(page.get_by_text("git_history")).to_be_visible()
+
+    def test_scan_detail_is_accessible(self, server_with_scan: str, page: Page):
+        _login(page, server_with_scan)
+        page.get_by_role("button", name="repo").click()
+        expect(page.get_by_role("heading", name="analyzers")).to_be_visible(timeout=15_000)
+        _assert_no_serious_a11y_violations(page)

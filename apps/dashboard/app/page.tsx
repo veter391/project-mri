@@ -5,6 +5,7 @@ import {
   ApiError,
   clearToken,
   getFusion,
+  getScan,
   getToken,
   listProjects,
   listScans,
@@ -13,6 +14,7 @@ import {
   type FusionFile,
   type Project,
   type Scan,
+  type ScanDetail,
 } from "@/lib/api";
 
 export default function Dashboard() {
@@ -35,8 +37,17 @@ export default function Dashboard() {
 
 function AuthedApp({ onLogout }: { onLogout: () => void }) {
   const [tab, setTab] = useState<"overview" | "fusion">("overview");
+  const [scanUuid, setScanUuid] = useState<string | null>(null);
+
+  if (scanUuid) {
+    return <ScanDetailView uuid={scanUuid} onLogout={onLogout} onBack={() => setScanUuid(null)} />;
+  }
   return tab === "overview" ? (
-    <Overview onLogout={onLogout} onFusion={() => setTab("fusion")} />
+    <Overview
+      onLogout={onLogout}
+      onFusion={() => setTab("fusion")}
+      onOpenScan={setScanUuid}
+    />
   ) : (
     <FusionView onLogout={onLogout} onOverview={() => setTab("overview")} />
   );
@@ -113,7 +124,15 @@ function fmtDate(raw: string): string {
   return Number.isNaN(d.getTime()) ? raw : d.toLocaleString();
 }
 
-function Overview({ onLogout, onFusion }: { onLogout: () => void; onFusion: () => void }) {
+function Overview({
+  onLogout,
+  onFusion,
+  onOpenScan,
+}: {
+  onLogout: () => void;
+  onFusion: () => void;
+  onOpenScan: (uuid: string) => void;
+}) {
   const [scans, setScans] = useState<Scan[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -168,8 +187,15 @@ function Overview({ onLogout, onFusion }: { onLogout: () => void; onFusion: () =
               </thead>
               <tbody>
                 {scans.map((s) => (
-                  <tr key={s.scan_uuid} className="border-t border-line">
-                    <td className="px-4 py-2">{s.project_name}</td>
+                  <tr key={s.scan_uuid} className="border-t border-line hover:bg-raised">
+                    <td className="px-4 py-2">
+                      <button
+                        onClick={() => onOpenScan(s.scan_uuid)}
+                        className="min-h-11 text-left text-accent hover:underline"
+                      >
+                        {s.project_name}
+                      </button>
+                    </td>
                     <td className="px-4 py-2 text-mute">{s.status}</td>
                     <td className={`px-4 py-2 ${BAND(healthOf(s))}`}>{healthOf(s) ?? "—"}</td>
                     <td className="px-4 py-2 text-mute">{fmtDate(s.started_at)}</td>
@@ -333,6 +359,103 @@ function FusionCard({ file }: { file: FusionFile }) {
         })}
       </ul>
     </article>
+  );
+}
+
+function ScanDetailView({
+  uuid,
+  onLogout,
+  onBack,
+}: {
+  uuid: string;
+  onLogout: () => void;
+  onBack: () => void;
+}) {
+  const [detail, setDetail] = useState<ScanDetail | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    getScan(uuid)
+      .then(setDetail)
+      .catch((err) => {
+        if (err instanceof ApiError && err.status === 401) return onLogout();
+        setError("Could not load scan.");
+      });
+  }, [uuid, onLogout]);
+
+  return (
+    <main className="mx-auto max-w-5xl px-6">
+      <header className="flex items-center justify-between border-b border-line py-4">
+        <button onClick={onBack} className="min-h-11 text-sm text-mute hover:text-accent">
+          ← scans
+        </button>
+        <button onClick={onLogout} className="min-h-11 text-sm text-mute hover:text-accent">
+          sign out
+        </button>
+      </header>
+
+      <section className="py-8">
+        {error ? (
+          <p className="text-sm text-alert">{error}</p>
+        ) : detail == null ? (
+          <p className="text-sm text-mute">Loading…</p>
+        ) : (
+          <>
+            <h1 className="text-xl font-bold">{detail.project_name}</h1>
+            <p className="mb-8 text-sm text-mute">
+              {detail.status}
+              {detail.report
+                ? ` · health ${Math.round(detail.report.overall_health)} (${detail.report.overall_band})`
+                : ""}
+            </p>
+
+            <h2 className="mb-3 text-xs tracking-widest text-mute">/// analyzers</h2>
+            <div className="mb-8 overflow-x-auto rounded-sm border border-line">
+              <table className="w-full text-left text-[13px]">
+                <thead className="bg-deep text-mute">
+                  <tr>
+                    <th scope="col" className="px-4 py-2 font-normal">Analyzer</th>
+                    <th scope="col" className="px-4 py-2 font-normal">Score</th>
+                    <th scope="col" className="px-4 py-2 font-normal">Findings</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(detail.report?.runs ?? []).map((r) => (
+                    <tr key={r.name} className="border-t border-line">
+                      <td className="px-4 py-2">{r.name}</td>
+                      <td className={`px-4 py-2 ${BAND(r.score?.value ?? undefined)}`}>
+                        {r.score?.value != null ? Math.round(r.score.value) : "—"}
+                      </td>
+                      <td className="px-4 py-2 text-mute">{r.findings.length}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {detail.report && detail.report.findings.length > 0 ? (
+              <>
+                <h2 className="mb-3 text-xs tracking-widest text-mute">
+                  /// top findings ({detail.report.findings.length} total)
+                </h2>
+                <div className="space-y-2">
+                  {detail.report.findings.slice(0, 30).map((f, i) => (
+                    <div key={i} className="rounded-sm border-l-2 border-line-2 bg-card px-4 py-2">
+                      <div className="text-xs uppercase tracking-wider text-mute">
+                        {f.severity}
+                        {f.score != null ? ` · ${Math.round(f.score)}` : ""}
+                      </div>
+                      <div className="font-bold">{f.title}</div>
+                      {f.target_path ? <div className="text-xs text-accent">{f.target_path}</div> : null}
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : null}
+          </>
+        )}
+      </section>
+    </main>
   );
 }
 
