@@ -3,7 +3,7 @@
 **Goal:** a production-ready, self-hosted, MIT-licensed codebase intelligence
 tool — not a demo and not an MVP.
 
-**Last verified against the code:** 2026-07-20. Every box below was checked by
+**Last verified against the code:** 2026-07-21. Every box below was checked by
 running the thing or reading the file that implements it, not from memory. If
 you find a claim here that the code does not support, that is a bug in this
 document and worth an issue.
@@ -74,11 +74,26 @@ it claims correlation or causation.
       itself ([ADR-011](adr/ADR-011-base-risk-composition.md) explains why that
       would be an over-claim)
 
+**Product surfaces & release readiness**
+- [x] The moat is carried by every surface: `mri fusion` (CLI), the fusion HTTP
+      route, the agent-native MCP server (5 tools), SARIF (authorship in finding
+      properties), the self-contained HTML report (fusion section), and the
+      **dashboard fusion view** — verified in a real browser + axe
+- [x] Security & performance audit gate run ([AUDIT.md](AUDIT.md)): bandit 0
+      medium+ (4 false positives verified and suppressed with reason), pip-audit
+      0 known CVEs, a perf figure on a mid-size repo
+- [x] Packaging verified ([PACKAGING.md](PACKAGING.md)): the wheel installs into
+      a clean virtualenv and the `mri` CLI runs from the installed path; it ships
+      the pre-built dashboard so no Node runtime is needed
+- [x] Technical SEO on the public site: sitemap, robots, JSON-LD structured data
+
 **Documentation**
 - [x] [INSTALL.md](INSTALL.md), [CONFIG.md](CONFIG.md), [API.md](API.md),
-      [INTEGRATIONS.md](INTEGRATIONS.md), [DASHBOARD.md](DASHBOARD.md)
-- [x] [Architecture decision records](adr/README.md), including the ones that
-      declined a dependency and said why
+      [INTEGRATIONS.md](INTEGRATIONS.md), [DASHBOARD.md](DASHBOARD.md),
+      [METHODOLOGY.md](METHODOLOGY.md), [TRUST.md](TRUST.md),
+      [AUDIT.md](AUDIT.md), [PACKAGING.md](PACKAGING.md)
+- [x] [Architecture decision records](adr/README.md) (14 ADRs), including the
+      ones that declined a dependency or a framing and said why
 
 ---
 
@@ -106,12 +121,17 @@ are in "Planned" below, each gated on a real input rather than started early.
 
 Named explicitly so the absence is not mistaken for an oversight:
 
-- The dashboard is currently a login shell. The projects list, scan detail,
-  diff view, and settings screens are designed but not implemented.
+- The dashboard has login, an overview + scans list, and the **AI-provenance
+  fusion view** (per-file authorship, decisions and consequences, verified in a
+  real browser with axe). The scan-detail, diff, and settings screens are
+  designed but not implemented.
 - No persistent scan queue — scans do not survive a server restart.
-- No `install.sh` one-liner, `docker-compose.yml`, GitHub Action, GitLab CI
-  template, or Homebrew formula. The supported installs today are
-  `pip install project-mri` and the container image.
+- No GitLab CI template or Homebrew formula. (`pip install project-mri`, `pipx`,
+  `scripts/install.sh`, the `Dockerfile` + `deploy/docker-compose.yml`, and the
+  `.github/action/` composite Action all exist.)
+- Actual **publish/launch is owner-gated**: PyPI/TestPyPI upload, a pushed
+  container image, and the production domain wait on the owner's decision and
+  credentials. The artifacts are release-ready (see [PACKAGING.md](PACKAGING.md)).
 
 ## Definition of done, for any item above
 
