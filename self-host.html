@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Self-host · project-mri</title>
+<meta name="description" content="Run project-mri on your own machine end to end: install, init, serve, scan. Local-first, zero telemetry — your code never leaves your machine.">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23F4A847' stroke-width='2'><circle cx='12' cy='12' r='9'/><circle cx='12' cy='12' r='3'/><path d='M12 1v3M12 20v3'/></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,700;1,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./css/tokens.css">
+<link rel="stylesheet" href="./css/base.css">
+<link rel="stylesheet" href="./css/components.css">
+<link rel="stylesheet" href="./css/demos.css">
+</head>
+<body data-route="/self-host">
+
+<div id="site-vignette"></div>
+<div id="site-nav"></div>
+
+<main id="main-content" data-page-section="/self-host">
+
+<header class="page-head">
+  <div class="container">
+    <div class="page-head__crumb">run it yourself · local-first by default</div>
+    <h1 class="page-head__title">Self-host in <em>four commands</em>.</h1>
+    <p class="page-head__sub">
+      project-mri is self-hosted by default — the whole experience runs on your own machine or server. Install, initialize, serve, scan. No account, no telemetry, no cloud dependency.
+    </p>
+  </div>
+</header>
+
+<!-- ==================== WALKTHROUGH ==================== -->
+<section class="section">
+  <div class="container container--narrow">
+    <div class="section__head">
+      <span class="eyebrow">/// the walkthrough</span>
+      <h2 class="t-h2">Four steps, start to finish.</h2>
+    </div>
+
+    <div class="values-grid">
+      <div class="principle">
+        <div class="principle__num">01</div>
+        <div class="principle__title">Install</div>
+        <div class="principle__body"><p>One Python package. The dashboard ships as pre-built static assets, so there is no Node runtime to install.</p></div>
+      </div>
+      <div class="principle">
+        <div class="principle__num">02</div>
+        <div class="principle__title">Initialize</div>
+        <div class="principle__body"><p>Creates your admin user and a local database. Prompts for a username, a password (8+ chars), and a config path. Idempotent — safe to re-run.</p></div>
+      </div>
+      <div class="principle">
+        <div class="principle__num">03</div>
+        <div class="principle__title">Serve</div>
+        <div class="principle__body"><p>Binds to <code>127.0.0.1:7331</code> by default — local-only, no auth needed on loopback. Then open the dashboard in your browser.</p></div>
+      </div>
+      <div class="principle">
+        <div class="principle__num">04</div>
+        <div class="principle__title">Scan a repository</div>
+        <div class="principle__body"><p>Point it at a local directory or a git URL. A remote URL is shallow-cloned into a sandbox and cleaned up afterward.</p></div>
+      </div>
+    </div>
+
+    <div class="term-box term-box--primary" style="margin-top:28px;">
+      <div class="term-box__title"><span>quickstart.sh</span><span>four commands</span></div>
+      <div class="term-box__body" style="padding:0;">
+<pre><code><span class="c-comment"># 1 · install (pipx, pip, or uv all work)</span>
+<span class="c-key">$</span> pipx install project-mri
+<span class="c-key">$</span> mri --version
+<span class="c-str">project-mri 0.1.0</span>
+
+<span class="c-comment"># 2 · initialize — admin user + local database</span>
+<span class="c-key">$</span> mri init
+
+<span class="c-comment"># 3 · serve on loopback, then open the dashboard</span>
+<span class="c-key">$</span> mri serve
+<span class="c-comment"># → http://localhost:7331/dashboard/</span>
+
+<span class="c-comment"># 4 · scan a local checkout…</span>
+<span class="c-key">$</span> mri scan /path/to/your/code
+<span class="c-comment"># …or a remote repo (shallow clone, auto-cleanup)</span>
+<span class="c-key">$</span> mri scan https://github.com/yourorg/yourrepo.git</code></pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== LOCAL-FIRST GUARANTEE ==================== -->
+<section class="section">
+  <div class="container">
+    <div class="section__head">
+      <span class="eyebrow">/// the local-first guarantee</span>
+      <h2 class="t-h2">Proven, not asserted.</h2>
+    </div>
+
+    <div class="feature-grid">
+      <div class="feature feature--md">
+        <div class="feature__title">// your code never leaves your machine</div>
+        <div class="feature__body">
+          <p>No SaaS, no account, no phone-home. The only network access is what you explicitly ask for — cloning a repo URL you named, or a webhook you configured.</p>
+        </div>
+      </div>
+      <div class="feature feature--md">
+        <div class="feature__title">// zero telemetry, proven not asserted</div>
+        <div class="feature__body">
+          <p>A test replaces the socket layer and fails the build if any code path opens a non-loopback connection. The suite runs a full local scan and a full session-log ingest with the network sealed.</p>
+        </div>
+      </div>
+      <div class="feature feature--md">
+        <div class="feature__title">// fail-closed when exposed</div>
+        <div class="feature__body">
+          <p>Bind to a public interface without configuring auth and the server refuses to start, rather than serving in the open. Loopback stays frictionless; everything else needs an API key or a dashboard user.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== EXPOSING ON A NETWORK ==================== -->
+<section class="section">
+  <div class="container container--narrow">
+    <div class="section__head">
+      <span class="eyebrow">/// exposing it on a network</span>
+      <h2 class="t-h2">Reachable from another host.</h2>
+    </div>
+    <p class="t-body" style="font-size:15px;line-height:1.7;max-width:66ch;">
+      To reach the dashboard from another host, bind to all interfaces and put it behind a reverse proxy. Because the server fails closed on a non-loopback bind, you must configure auth first — set an API key or create a dashboard user with <code>mri init</code>.
+    </p>
+
+    <div class="term-box" style="margin-top:20px;">
+      <div class="term-box__title"><span>expose.sh</span><span>auth required</span></div>
+      <div class="term-box__body" style="padding:0;">
+<pre><code><span class="c-comment"># requires auth to be configured, or it refuses to start</span>
+<span class="c-key">$</span> MRI_HOST=0.0.0.0 mri serve</code></pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== GO DEEPER ==================== -->
+<section class="section">
+  <div class="container">
+    <div class="section__head">
+      <span class="eyebrow">/// go deeper</span>
+      <h2 class="t-h2">The docs that back this up.</h2>
+    </div>
+
+    <div class="feature-grid">
+      <a class="feature feature--md" href="https://github.com/project-mri/project-mri/blob/main/docs/INSTALL.md" target="_blank" rel="noopener">
+        <div class="feature__title">INSTALL.md ↗</div>
+        <div class="feature__body"><p>Full install matrix — pipx, pip, Docker, and from source.</p></div>
+      </a>
+      <a class="feature feature--md" href="https://github.com/project-mri/project-mri/blob/main/docs/CONFIG.md" target="_blank" rel="noopener">
+        <div class="feature__title">CONFIG.md ↗</div>
+        <div class="feature__body"><p>The complete <code>.mri.yml</code> reference — every key and default.</p></div>
+      </a>
+      <a class="feature feature--md" href="https://github.com/project-mri/project-mri/blob/main/docs/DASHBOARD.md" target="_blank" rel="noopener">
+        <div class="feature__title">DASHBOARD.md ↗</div>
+        <div class="feature__body"><p>Using the self-hosted dashboard: reports, hotspots, fusion view.</p></div>
+      </a>
+      <a class="feature feature--md" href="https://github.com/project-mri/project-mri/blob/main/docs/TRUST.md" target="_blank" rel="noopener">
+        <div class="feature__title">TRUST.md ↗</div>
+        <div class="feature__body"><p>Every guarantee, mapped to the code or test that proves it.</p></div>
+      </a>
+    </div>
+
+    <div class="btn-row" style="margin-top:28px;">
+      <a class="btn btn--primary btn--lg" href="./install">./install →</a>
+      <a class="btn btn--ghost btn--lg" href="./docs">read the docs →</a>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<div id="site-footer"></div>
+<div id="site-status"></div>
+
+<script type="module" src="./dist/index.js"></script>
+</body>
+</html>

@@ -79,10 +79,10 @@ jobs:
           fail_ci_if_error: false
 
   # -----------------------------------------------------------------------
-  # Frontend build — Next.js apps (marketing site + self-hosted dashboard)
+  # Frontend build — static marketing site (root) + Next.js dashboard
   # -----------------------------------------------------------------------
   test-frontend:
-    name: Frontend build (apps/web + apps/dashboard)
+    name: Frontend build (site + apps/dashboard)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -93,8 +93,10 @@ jobs:
           cache: pnpm
       - name: Install
         run: pnpm install --frozen-lockfile
-      - name: Type-check both apps (tsc)
-        run: pnpm -r --if-present typecheck
+      - name: Type-check the site (tsc) + the dashboard
+        run: pnpm run typecheck
+      - name: Build the static marketing site (tsc → dist/)
+        run: pnpm run build:site
 
   # -----------------------------------------------------------------------
   # API contract — the dashboard's types are generated from the API schema.
@@ -128,8 +130,6 @@ jobs:
             exit 1
           fi
           echo "API types are in sync with the schema"
-      - name: Build web (Next.js)
-        run: pnpm --filter @mri/web build
       - name: Build dashboard (Next.js static export + embed)
         run: pnpm --filter @mri/dashboard build
 

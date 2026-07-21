@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Manifesto · project-mri</title>
+<meta name="description" content="The principles behind Project MRI. Facts over magic scores. Local-first. Explain before recommend.">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23F4A847' stroke-width='2'><circle cx='12' cy='12' r='9'/><circle cx='12' cy='12' r='3'/><path d='M12 1v3M12 20v3'/></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,700;1,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./css/tokens.css">
+<link rel="stylesheet" href="./css/base.css">
+<link rel="stylesheet" href="./css/components.css">
+<link rel="stylesheet" href="./css/demos.css">
+</head>
+<body data-route="/manifesto">
+
+<div id="site-vignette"></div>
+<div id="site-nav"></div>
+
+<main id="main-content" data-page-section="/manifesto">
+
+<section class="banner">
+  <div class="container">
+    <h1 class="banner__title">Facts over magic scores.<br><em>Local-first.</em><br>Explain before recommend.</h1>
+    <p class="banner__sub">Four principles that decide every design decision in Project MRI. Read them. Question them. Hold us to them.</p>
+  </div>
+</section>
+
+<!-- ==================== 4 PRINCIPLES ==================== -->
+<section class="section">
+  <div class="container container--narrow">
+
+    <article class="principle" style="margin-bottom:18px;">
+      <div class="principle__num">01</div>
+      <div class="principle__title">Facts over magic scores.</div>
+      <div class="principle__body">
+        <p>A composite score is only useful if you can decompose it. If <code>architecture_health = 71</code>, you should see <em>why</em> — not a black box, but a tree of named, traceable signals. We will never ship a number you can't audit.</p>
+        <p>Most existing tools give you a score and trust you to react. We give you the score AND the receipts. Every signal is a real, queryable, exportable piece of evidence.</p>
+      </div>
+    </article>
+
+    <article class="principle" style="margin-bottom:18px;">
+      <div class="principle__num">02</div>
+      <div class="principle__title">Local-first. Always.</div>
+      <div class="principle__body">
+        <p>Your code is yours. We will never phone home. We will never require a login. We will never bundle analytics, telemetry, or "usage data" by default. The local database is a regular file on your disk — readable, exportable, deletable.</p>
+        <p>Cloud features (managed instance, team sync, hosted dashboard) will be opt-in, transparently priced, and never required for core functionality. GDPR compliance isn't a feature — it's the baseline.</p>
+      </div>
+    </article>
+
+    <article class="principle" style="margin-bottom:18px;">
+      <div class="principle__num">03</div>
+      <div class="principle__title">Explain before recommend.</div>
+      <div class="principle__body">
+        <p>Most tools lead with recommendations: "refactor this", "fix that", "invest here". We lead with <em>data</em>. The report shows the architecture, the trends, the risk signals — and only then offers suggestions. You should be able to disagree with the recommendation and still understand the analysis.</p>
+        <p>This is the opposite of "AI assistant that just tells you what to do". We trust the operator to make decisions. We make sure they have the facts.</p>
+      </div>
+    </article>
+
+    <article class="principle" style="margin-bottom:18px;">
+      <div class="principle__num">04</div>
+      <div class="principle__title">Open source core. Forever.</div>
+      <div class="principle__body">
+        <p>The decision engine, the analyzers, the scoring algorithms, the report generators — all open source. MIT-licensed. Fork it. Audit it. Ship it inside your company. Build a competitor on top of it. We want this.</p>
+        <p>Commercial features (managed hosting, enterprise SSO, support contracts) live <em>on top of</em> the open core, never <em>instead of</em> it. The MIT license will not change without explicit community consent.</p>
+      </div>
+    </article>
+
+  </div>
+</section>
+
+<!-- ==================== WHAT WE WON'T BUILD ==================== -->
+<section class="section">
+  <div class="container container--narrow">
+
+    <div class="section__head">
+      <span class="eyebrow">/// non-goals</span>
+      <h2 class="t-h2">What we won't build.</h2>
+      <p class="t-lede section__sub">Every project needs boundaries. These are ours — for now, and probably for the foreseeable future.</p>
+    </div>
+
+    <ul class="t-list">
+      <li><strong>Real-time monitoring / runtime observability.</strong> We scan repos, not live systems. Use Prometheus, Datadog, or OpenTelemetry for that.</li>
+      <li><strong>Security vulnerability scanning.</strong> Trivy, Snyk, and GitHub's own Dependabot do this better. We won't reinvent.</li>
+      <li><strong>Replacing SonarQube.</strong> Different focus. Sonar measures code style and security; MRI measures architecture and history.</li>
+      <li><strong>Automatic code refactoring.</strong> We tell you <em>what's</em> risky. We never silently modify your code.</li>
+      <li><strong>Cloud-hosted SaaS by default.</strong> The core stays local. Cloud is opt-in.</li>
+      <li><strong>Replacing your Git host.</strong> We don't clone your code to our servers. We read your local <code>.git</code> directory.</li>
+    </ul>
+
+  </div>
+</section>
+
+<!-- ==================== WHY OPEN SOURCE ==================== -->
+<section class="section">
+  <div class="container container--narrow">
+
+    <div class="section__head">
+      <span class="eyebrow">/// why open source</span>
+      <h2 class="t-h2">The license is part of the product.</h2>
+      <p class="t-lede section__sub">Not a marketing line. A structural commitment.</p>
+    </div>
+
+    <div class="values-grid">
+
+      <div class="term-box">
+        <div class="term-box__title"><span>auditability</span><span>why</span></div>
+        <div class="term-box__body">
+          <p>If a tool tells you your codebase has a problem, you should be able to read the algorithm that decided that. Closed-source analysis tools are unfalsifiable claims.</p>
+        </div>
+      </div>
+
+      <div class="term-box">
+        <div class="term-box__title"><span>trust</span><span>why</span></div>
+        <div class="term-box__body">
+          <p>Codebases are the most sensitive artifact an engineering team owns. "Trust us, we run it locally" is weaker than "read the source and verify".</p>
+        </div>
+      </div>
+
+      <div class="term-box">
+        <div class="term-box__title"><span>longevity</span><span>why</span></div>
+        <div class="term-box__body">
+          <p>If we disappear tomorrow, the tool still works. The community can fork. The MIT license guarantees no rug-pull.</p>
+        </div>
+      </div>
+
+      <div class="term-box">
+        <div class="term-box__title"><span>ecosystem</span><span>why</span></div>
+        <div class="term-box__body">
+          <p>Plugins, integrations, language analyzers, scoring models — they emerge faster from a community than from a roadmap. We want the long tail.</p>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="callout" style="margin-top:32px;">
+      <div class="callout__label">// license</div>
+      MIT for the core. AGPL-3.0 for the hosted/managed add-on (TBD with community input). No source-available loopholes. No "community edition" that's deliberately crippled. The full experience is free, forever, for any use.
+    </div>
+
+  </div>
+</section>
+
+<!-- ==================== PHILOSOPHY STATEMENT ==================== -->
+<section class="section">
+  <div class="container container--narrow">
+    <div class="ascii-block" style="font-size:11px;line-height:1.4;text-align:center;color:var(--accent-pale);">
+// We don't believe in magic numbers.
+// We don't believe in lock-in.
+// We don't believe in cloud-required for local work.
+// We don't believe in AI that hides its reasoning.
+// We don't believe in dashboards that can't explain themselves.
+//
+// We believe in facts. We believe in your machine.
+// We believe in software that survives its authors.
+// We believe in 5-year-old MRI reports still being readable.
+//
+// If you agree, contribute.
+// If you don't, fork it.
+    </div>
+  </div>
+</section>
+
+</main>
+
+<div id="site-footer"></div>
+<div id="site-status"></div>
+
+<script type="module" src="./dist/index.js"></script>
+</body>
+</html>

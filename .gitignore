@@ -184,3 +184,6 @@ apps/*/.next/
 apps/*/out/
 apps/**/next-env.d.ts
 .next/
+
+# Cloudflare static-assets bundle (built by tools/assemble-site.mjs)
+/_site/

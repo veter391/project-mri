@@ -2,18 +2,22 @@
   "name": "project-mri-workspace",
   "version": "0.0.0",
   "private": true,
-  "description": "Monorepo workspace for project-mri — Next.js apps (web, dashboard) alongside the Python package in src/",
+  "description": "project-mri — the static marketing site (root: html/css/ts) and the Next.js dashboard (apps/dashboard) alongside the Python package in src/",
   "packageManager": "pnpm@11.1.2",
   "engines": {
     "node": ">=22.13"
   },
   "scripts": {
-    "dev:web": "pnpm --filter @mri/web dev",
+    "dev:site": "python tools/serve-site.py",
     "dev:dashboard": "pnpm --filter @mri/dashboard dev",
-    "build:web": "pnpm --filter @mri/web build",
+    "build:site": "tsc",
     "build:dashboard": "pnpm --filter @mri/dashboard build",
+    "site:bundle": "tsc && node tools/assemble-site.mjs",
+    "preview:cf": "pnpm run site:bundle && pnpm dlx wrangler@4 dev",
+    "deploy:preview": "pnpm run site:bundle && pnpm dlx wrangler@4 deploy --env preview",
+    "deploy": "pnpm run site:bundle && pnpm dlx wrangler@4 deploy --env production",
     "types:api": "python -m mri.cli openapi -o openapi.json && pnpm --filter @mri/dashboard types:api",
-    "typecheck": "pnpm -r --if-present typecheck"
+    "typecheck": "tsc --noEmit && pnpm -r --if-present typecheck"
   },
   "license": "MIT",
   "devDependencies": {
