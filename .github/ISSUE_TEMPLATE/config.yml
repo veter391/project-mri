@@ -1,11 +1,11 @@
 blank_issues_enabled: false
 contact_links:
   - name: Questions & general help
-    url: https://github.com/project-mri/project-mri/discussions/categories/q-a
+    url: https://github.com/veter391/project-mri/discussions/categories/q-a
     about: Ask questions and get help in Discussions. The issue tracker is for confirmed bugs and scoped feature requests only.
   - name: Ideas & feedback
-    url: https://github.com/project-mri/project-mri/discussions/categories/ideas
+    url: https://github.com/veter391/project-mri/discussions/categories/ideas
     about: Share early-stage ideas or feedback before opening a formal feature request.
   - name: Report a security vulnerability
-    url: https://github.com/project-mri/project-mri/security/policy
+    url: https://github.com/veter391/project-mri/security/policy
     about: Please report security issues privately. Never open a public issue for a vulnerability.

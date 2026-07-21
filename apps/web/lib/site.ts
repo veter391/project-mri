@@ -1,13 +1,13 @@
 // Canonical site constants — single source of truth for the marketing site.
 // Values reconciled against the repo docs (BUILD-NOTES / _workspace/docs-working).
-// GitHub org form is canonical; veter391/* is the owner's personal remote.
+// Links point at the real public repo.
 
 export const SITE = {
   name: "MRI",
   pkg: "project-mri",
   url: "https://mri.shypot.com",
-  github: "https://github.com/project-mri/project-mri",
-  license: "https://github.com/project-mri/project-mri/blob/main/LICENSE",
+  github: "https://github.com/veter391/project-mri",
+  license: "https://github.com/veter391/project-mri/blob/main/LICENSE",
   version: "0.3.0",
   port: 7331,
   tagline: "MRI reads what's actually in your codebase — and who actually wrote it.",

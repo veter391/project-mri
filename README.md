@@ -6,7 +6,7 @@
 ![License: MIT](https://img.shields.io/badge/license-MIT--forever-amber)
 ![Version](https://img.shields.io/badge/version-0.3.0-amber)
 ![Status: Beta](https://img.shields.io/badge/status-beta-amber)
-[![CI](https://github.com/project-mri/project-mri/actions/workflows/ci.yml/badge.svg)](https://github.com/project-mri/project-mri/actions/workflows/ci.yml)
+[![CI](https://github.com/veter391/project-mri/actions/workflows/ci.yml/badge.svg)](https://github.com/veter391/project-mri/actions/workflows/ci.yml)
 
 **MRI** turns a repository into an explainable model of its history, structure,
 and risk — and then goes where other tools stop: it reads the AI-session logs
@@ -75,7 +75,7 @@ pipx install project-mri        # or: pip install --user project-mri
 
 Or with Docker (build from source):
 ```bash
-git clone https://github.com/project-mri/project-mri.git
+git clone https://github.com/veter391/project-mri.git
 cd project-mri
 docker build -t project-mri .
 docker run -d --name project-mri -p 7331:7331 \
@@ -220,7 +220,7 @@ Disclosure policy: [SECURITY.md](./SECURITY.md).
 ## Development
 
 ```bash
-git clone https://github.com/project-mri/project-mri.git
+git clone https://github.com/veter391/project-mri.git
 cd project-mri
 
 # Backend (src-layout, editable install)

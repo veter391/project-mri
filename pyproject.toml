@@ -76,10 +76,10 @@ mri-server = "mri.cli:cli"
 
 [project.urls]
 Homepage = "https://mri.shypot.com"
-Documentation = "https://github.com/project-mri/project-mri/blob/main/README.md"
-Repository = "https://github.com/project-mri/project-mri.git"
-Issues = "https://github.com/project-mri/project-mri/issues"
-Changelog = "https://github.com/project-mri/project-mri/blob/main/CHANGELOG.md"
+Documentation = "https://github.com/veter391/project-mri/blob/main/README.md"
+Repository = "https://github.com/veter391/project-mri.git"
+Issues = "https://github.com/veter391/project-mri/issues"
+Changelog = "https://github.com/veter391/project-mri/blob/main/CHANGELOG.md"
 
 # --- src-layout: the importable package lives under src/mri ---
 [tool.setuptools.packages.find]

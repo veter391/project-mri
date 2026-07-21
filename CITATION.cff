@@ -21,8 +21,8 @@ keywords:
   - agent-native
   - open-source
 license: MIT
-repository-code: "https://github.com/project-mri/project-mri"
-url: "https://github.com/project-mri/project-mri"
+repository-code: "https://github.com/veter391/project-mri"
+url: "https://github.com/veter391/project-mri"
 # Uncomment and fill in on each tagged release:
 # version: "0.1.0"
 # date-released: "2026-01-01"

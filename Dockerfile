@@ -100,5 +100,5 @@ CMD ["mri", "serve", "--host", "0.0.0.0", "--port", "7331"]
 # Labels
 LABEL org.opencontainers.image.title="project-mri" \
       org.opencontainers.image.description="MRI scan for your codebase" \
-      org.opencontainers.image.source="https://github.com/project-mri/project-mri" \
+      org.opencontainers.image.source="https://github.com/veter391/project-mri" \
       org.opencontainers.image.licenses="MIT"
