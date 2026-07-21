@@ -9,10 +9,12 @@ const GITHUB = "https://github.com/veter391/project-mri";
 const LINKS = [
   { href: "/", label: "~ /" },
   { href: "/features", label: "~ /features" },
+  { href: "/demo", label: "~ /demo" },
   { href: "/architecture", label: "~ /architecture" },
   { href: "/comparison", label: "~ /comparison" },
   { href: "/install", label: "~ /install" },
   { href: "/self-host", label: "~ /self-host" },
+  { href: "/docs", label: "~ /docs" },
   { href: "/manifesto", label: "~ /manifesto" },
   { href: "/roadmap", label: "~ /roadmap" },
   { href: "/about", label: "~ /about" },

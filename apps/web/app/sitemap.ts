@@ -9,10 +9,12 @@ const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "https://project-mri.dev";
 const ROUTES = [
   "/",
   "/features",
+  "/demo",
   "/architecture",
   "/comparison",
   "/install",
   "/self-host",
+  "/docs",
   "/manifesto",
   "/roadmap",
   "/about",
