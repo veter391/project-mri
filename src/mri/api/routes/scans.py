@@ -766,18 +766,17 @@ async def get_report_sarif(
     report = Report.model_validate(raw)
 
     # Attach stored authorship shares (newest per file) if a fusion run computed
-    # any, so the SARIF a CI reads carries provenance next to each finding.
-    cur = await conn.execute(
-        "SELECT file_path, share_ai, share_unattributed, method, confidence, MAX(created_at)"
-        " FROM authorship_shares WHERE project_id = ? GROUP BY file_path",
-        (row["project_id"],),
-    )
+    # any, so the SARIF a CI reads carries provenance next to each finding. Uses
+    # the shared repository helper so the "newest share" is defined identically
+    # to what the HTML report and MCP tools show.
+    from mri.db.fusion_repository import latest_authorship_shares
+
     authorship = {
-        r[0]: {
-            "ai_authored_pct": r[1], "unattributed_pct": r[2],
-            "method": r[3], "confidence": r[4],
+        path: {
+            "ai_authored_pct": s.share_ai, "unattributed_pct": s.share_unattributed,
+            "method": s.method, "confidence": s.confidence,
         }
-        for r in await cur.fetchall()
+        for path, s in (await latest_authorship_shares(conn, row["project_id"])).items()
     }
 
     sarif = _to_sarif(report, authorship=authorship)

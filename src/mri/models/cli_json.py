@@ -30,6 +30,9 @@ class FusionIngestJson(BaseModel):
 class FusionCorrelationJson(BaseModel):
     linked: int
     commits: int
+    #: Write touches with a time but no later commit — a real state, reported
+    #: rather than hidden (mirrors CorrelationResult.uncommitted).
+    uncommitted: int
 
 
 class FusionDecisionsJson(BaseModel):

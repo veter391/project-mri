@@ -428,10 +428,34 @@ async def authorship_for_file(
 ) -> list[AuthorshipShare]:
     cursor = await conn.execute(
         "SELECT * FROM authorship_shares WHERE project_id = ? AND file_path = ?"
-        " ORDER BY computed_at DESC LIMIT ?",
+        # id as a deterministic tiebreak: the blame method leaves computed_at NULL,
+        # so ordering on computed_at alone is undefined among a file's shares.
+        " ORDER BY computed_at DESC, id DESC LIMIT ?",
         (project_id, file_path, _limit(limit)),
     )
     return [AuthorshipShare(**dict(r)) for r in await cursor.fetchall()]
+
+
+async def latest_authorship_shares(
+    conn: aiosqlite.Connection, project_id: int
+) -> dict[str, AuthorshipShare]:
+    """The newest authorship share per file in a project, keyed by file path.
+
+    "Newest" is defined exactly as `authorship_for_file` defines it (computed_at,
+    then id) so every surface — the HTML report, the MCP tools, and the SARIF
+    export — reports one and the same current share for a file, rather than each
+    picking a different "latest". One query, named-column access.
+    """
+    cursor = await conn.execute(
+        "SELECT * FROM authorship_shares WHERE project_id = ?"
+        " ORDER BY file_path ASC, computed_at DESC, id DESC",
+        (project_id,),
+    )
+    out: dict[str, AuthorshipShare] = {}
+    for r in await cursor.fetchall():
+        share = AuthorshipShare(**dict(r))
+        out.setdefault(share.file_path, share)  # first row per file is the newest
+    return out
 
 
 _DECISION_COLUMNS = (

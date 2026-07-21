@@ -279,7 +279,9 @@ def fusion(project_path: str, top: int, store_content: bool, json_out: str | Non
                     sessions=report.ingest.sessions, touches=report.ingest.touches
                 ),
                 correlation=FusionCorrelationJson(
-                    linked=report.correlation.linked, commits=len(report.correlation.commits)
+                    linked=report.correlation.linked,
+                    commits=len(report.correlation.commits),
+                    uncommitted=report.correlation.uncommitted,
                 ),
                 decisions=FusionDecisionsJson(
                     adr=report.adrs, commit=report.commits, cross_links=report.decision_links
