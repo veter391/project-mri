@@ -8,6 +8,7 @@ const COLUMNS = [
     links: [
       { href: "/features", label: "Features" },
       { href: "/architecture", label: "Architecture" },
+      { href: "/comparison", label: "Comparison" },
       { href: "/roadmap", label: "Roadmap" },
       { href: "/manifesto", label: "Manifesto" },
     ],
@@ -16,6 +17,7 @@ const COLUMNS = [
     title: "Get started",
     links: [
       { href: "/install", label: "Install" },
+      { href: "/self-host", label: "Self-host" },
       { href: GITHUB, label: "GitHub ↗", external: true },
       { href: "/about", label: "About" },
     ],
