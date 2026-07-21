@@ -1,3 +1,7 @@
+<p align="center">
+  <img src=".github/assets/banner.png" alt="MRI — reads what's actually in your codebase, and who actually wrote it. Local-first, MIT-forever, zero telemetry." width="100%">
+</p>
+
 # MRI
 
 > **MRI reads what's actually in your codebase — and who actually wrote it.**
