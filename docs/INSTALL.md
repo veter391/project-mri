@@ -191,7 +191,8 @@ pip install --upgrade project-mri
 # Or use the CLI:
 mri upgrade
 
-# Or with docker:
+# Or with docker (image published to GHCR on tagged releases;
+# until then, build from source — see the Docker section above):
 docker pull ghcr.io/veter391/project-mri:latest
 ```
 
