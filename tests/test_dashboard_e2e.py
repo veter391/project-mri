@@ -164,6 +164,26 @@ class TestDashboardE2E:
         expect(page.get_by_role("button", name="sign out")).to_be_visible(timeout=15_000)
         _assert_no_serious_a11y_violations(page)
 
+    def test_fusion_view_renders(self, server: str, page: Page):
+        _login(page, server)
+        expect(page.get_by_role("button", name="fusion")).to_be_visible(timeout=15_000)
+        page.get_by_role("button", name="fusion").click()
+        expect(
+            page.get_by_role("heading", name="AI provenance & decisions")
+        ).to_be_visible(timeout=15_000)
+        expect(page.get_by_text("correlation, never causation", exact=False)).to_be_visible()
+        # Fresh DB — honest empty state, not a fabricated project.
+        expect(page.get_by_text("No projects yet.")).to_be_visible()
+
+    def test_fusion_view_is_accessible(self, server: str, page: Page):
+        _login(page, server)
+        expect(page.get_by_role("button", name="fusion")).to_be_visible(timeout=15_000)
+        page.get_by_role("button", name="fusion").click()
+        expect(
+            page.get_by_role("heading", name="AI provenance & decisions")
+        ).to_be_visible(timeout=15_000)
+        _assert_no_serious_a11y_violations(page)
+
     def test_sign_out_returns_to_login(self, server: str, page: Page):
         _login(page, server)
         expect(page.get_by_role("button", name="sign out")).to_be_visible(timeout=15_000)

@@ -42,6 +42,28 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 export type Scan = components["schemas"]["ScanSummary"];
 export type ScanListResponse = components["schemas"]["ScanListResponse"];
 export type LoginResponse = components["schemas"]["LoginResponse"];
+export type Project = components["schemas"]["ProjectSummary"];
+export type ProjectListResponse = components["schemas"]["ProjectListResponse"];
+
+// GET /api/projects/{id}/fusion returns a plain object (no Pydantic response
+// model), so it is not in the generated schema — typed here to the endpoint's
+// stable shape. Each factor's `statement` is the honest human sentence the
+// backend built; the UI renders it verbatim, it does not paraphrase.
+export interface FusionFactor {
+  name: string;
+  statement: string;
+  value: unknown;
+}
+export interface FusionFile {
+  file: string;
+  prose: string;
+  factors: FusionFactor[];
+}
+export interface FusionResponse {
+  project_id: number;
+  project: string;
+  files: FusionFile[];
+}
 
 export const login = (username: string, password: string) =>
   api<LoginResponse>("/auth/login", {
@@ -50,3 +72,6 @@ export const login = (username: string, password: string) =>
   });
 
 export const listScans = () => api<ScanListResponse>("/scans?limit=20");
+export const listProjects = () => api<ProjectListResponse>("/projects?limit=50");
+export const getFusion = (projectId: number, top = 25) =>
+  api<FusionResponse>(`/projects/${projectId}/fusion?top=${top}`);
