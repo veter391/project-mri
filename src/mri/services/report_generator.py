@@ -28,9 +28,13 @@ def _build_env() -> Environment:
     )
 
 
-def render_html(report: Report) -> str:
+def render_html(report: Report, fusion: list[dict] | None = None) -> str:
+    """Render the static report. `fusion`, when given, is a list of
+    ``{"file", "prose"}`` entries — the per-file AI-provenance explanation from a
+    fusion run — rendered as an extra section. Absent (the scan-time default,
+    before any fusion), the report is exactly as before."""
     template = _build_env().get_template("report.html.j2")
-    return template.render(report=report)
+    return template.render(report=report, fusion=fusion)
 
 
 def render_json(report: Report) -> str:

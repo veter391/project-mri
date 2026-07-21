@@ -587,7 +587,21 @@ async def get_report_html(scan_uuid: str, conn: aiosqlite.Connection = Depends(d
         raise HTTPException(409, "scan not completed yet")
     raw = json.loads(row["report_json"])
     report = Report.model_validate(raw)
-    return HTMLResponse(render_html(report))
+
+    # If a fusion run has produced provenance for this project's hotspots, render
+    # it as an extra section. Only files with real evidence (a factor beyond the
+    # bare risk score) are shown, so an un-fused project's report is unchanged.
+    from mri.db.repository import top_risk_files
+    from mri.fusion import explain_file
+
+    hotspots = await top_risk_files(conn, row["project_id"], limit=25)
+    fusion = []
+    for path, base_risk in hotspots.items():
+        exp = await explain_file(conn, path, project_id=row["project_id"], base_risk=base_risk)
+        if any(f.name != "risk" for f in exp.factors):
+            fusion.append({"file": exp.file_path, "prose": exp.prose})
+
+    return HTMLResponse(render_html(report, fusion=fusion or None))
 
 
 @router.get("/scans/{scan_uuid}/report.json")

@@ -55,6 +55,10 @@ h3 { font-size: 14px; font-weight: 700; margin: 24px 0 8px; color: var(--text-pr
 .finding__title { font-weight: 700; color: var(--text-primary); }
 .finding__desc { color: var(--text-secondary); font-size: 12px; margin-top: 4px; }
 .finding__path { color: var(--accent); font-size: 11px; margin-top: 4px; font-family: var(--font); }
+.fusion { display: flex; flex-direction: column; gap: 8px; }
+.fusion__file { padding: 12px 16px; background: var(--ink-card); border-left: 3px solid var(--accent); }
+.fusion__path { color: var(--accent); font-weight: 700; font-size: 12px; letter-spacing: 0.02em; }
+.fusion__prose { color: var(--text-secondary); font-size: 12px; margin-top: 6px; }
 .composition { background: var(--ink-card); border: 1px solid var(--line); padding: 24px; }
 .composition div { padding: 6px 0; border-bottom: 1px dashed var(--line); }
 .composition div:last-child { border-bottom: none; }
@@ -136,6 +140,19 @@ h3 { font-size: 14px; font-weight: 700; margin: 24px 0 8px; color: var(--text-pr
     </div>
     {% endfor %}
   </div>
+
+  {% if fusion %}
+  <h2>// AI provenance &amp; decisions ({{ fusion|length }} file{{ 's' if fusion|length != 1 else '' }})</h2>
+  <div class="sub">Who authored the riskiest files, traced to sessions, with the decisions and measured consequences behind them. Correlation, never causation.</div>
+  <div class="fusion">
+    {% for e in fusion %}
+    <div class="fusion__file">
+      <div class="fusion__path">{{ e.file }}</div>
+      <div class="fusion__prose">{{ e.prose }}</div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
 
   <div class="footer">
     Generated locally by project-mri v0.2.0 · {{ report.duration_ms }} ms · {{ report.finished_at.isoformat() if report.finished_at else 'in progress' }} · 0 telemetry events
