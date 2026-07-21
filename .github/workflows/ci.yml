@@ -79,10 +79,10 @@ jobs:
           fail_ci_if_error: false
 
   # -----------------------------------------------------------------------
-  # Frontend build — static marketing site (root) + Next.js dashboard
+  # Frontend build — Next.js marketing site (apps/web) + Next.js dashboard
   # -----------------------------------------------------------------------
   test-frontend:
-    name: Frontend build (site + apps/dashboard)
+    name: Frontend build (apps/web + apps/dashboard)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -93,10 +93,10 @@ jobs:
           cache: pnpm
       - name: Install
         run: pnpm install --frozen-lockfile
-      - name: Type-check the site (tsc) + the dashboard
+      - name: Type-check all workspaces
         run: pnpm run typecheck
-      - name: Build the static marketing site (tsc → dist/)
-        run: pnpm run build:site
+      - name: Build the marketing site (Next.js static export + _headers)
+        run: pnpm --filter @mri/web build
 
   # -----------------------------------------------------------------------
   # API contract — the dashboard's types are generated from the API schema.

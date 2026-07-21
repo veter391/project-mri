@@ -1,0 +1,46 @@
+# Cloudflare Workers — static-assets deploy for the MRI marketing site.
+#
+# The site is a Next.js static export (output: "export"): no Worker script, no
+# @opennextjs/cloudflare — assets are served directly. Build first with
+# `pnpm --filter @mri/web build` (runs `next build` + tools/gen-headers.mjs),
+# which produces ./out including _headers (CSP + security headers).
+#
+# Deploy (owner-gated — needs a Cloudflare login):
+#   pnpm --filter @mri/web deploy:preview
+#   pnpm --filter @mri/web deploy
+
+name = "project-mri-site"
+compatibility_date = "2026-05-12"
+
+[assets]
+directory = "./out"
+# Next export writes route/index.html (trailingSlash: true); serve them cleanly.
+html_handling = "auto-trailing-slash"
+not_found_handling = "404-page"
+
+[observability]
+enabled = true
+
+# --- Preview -----------------------------------------------------------------
+[env.preview]
+name = "project-mri-site-preview"
+
+[env.preview.assets]
+directory = "./out"
+html_handling = "auto-trailing-slash"
+not_found_handling = "404-page"
+
+# --- Production --------------------------------------------------------------
+[env.production]
+name = "project-mri-site"
+workers_dev = true
+# Point the custom domain here once DNS is on Cloudflare:
+# routes = [
+#   { pattern = "project-mri.dev", custom_domain = true },
+#   { pattern = "www.project-mri.dev", custom_domain = true },
+# ]
+
+[env.production.assets]
+directory = "./out"
+html_handling = "auto-trailing-slash"
+not_found_handling = "404-page"

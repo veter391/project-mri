@@ -3,5 +3,7 @@ packages:
   - 'packages/*'
 
 # sharp (Next.js image optimization) needs its install script; approve it.
+# unrs-resolver is eslint-config-next's native resolver — safe to build.
 allowBuilds:
   sharp: true
+  unrs-resolver: true

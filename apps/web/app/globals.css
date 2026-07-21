@@ -1,0 +1,261 @@
+@import "tailwindcss";
+
+/* ============================================================
+   MRI — design system (Tailwind v4 @theme)
+   Source of truth: _workspace/docs-working/DESIGN-SYSTEM.md
+   Terminal aesthetic, elevated: an instrument panel for a
+   diagnostic tool. One accent (amber), used sparingly.
+   Dark is native; light is a fully-supported mode.
+   ============================================================ */
+@theme {
+  /* ---- Fonts (wired from next/font in layout.tsx) ---- */
+  --font-sans: var(--font-space-grotesk), ui-sans-serif, system-ui, sans-serif;
+  --font-body: var(--font-outfit), ui-sans-serif, system-ui, sans-serif;
+  --font-mono:
+    var(--font-jetbrains-mono), ui-monospace, "SF Mono", Menlo, Consolas,
+    monospace;
+
+  /* ---- Color tokens (DARK — default) ---- */
+  --color-void: #06080f;
+  --color-surface: #0b0e18;
+  --color-raised: #11151f;
+  --color-inset: #04060b;
+  --color-hairline: #1c212e;
+  --color-hairline-strong: #2a3040;
+
+  --color-accent: #f4a847;
+  --color-accent-dim: #b87f35;
+
+  --color-primary: #f3f1ec;
+  --color-secondary: #b9bcc7;
+  --color-mute: #8a8fa0;
+  --color-dim: #6c7184;
+
+  --color-risk-critical: #e5484d;
+  --color-risk-high: #f4a847;
+  --color-risk-medium: #e8c468;
+  --color-risk-low: #5fb88a;
+  --color-risk-none: #3d4250;
+
+  --color-author-human: #5fb88a;
+  --color-author-ai: #7c9cf4;
+  --color-author-mixed: #c9a24e;
+
+  /* ---- Fluid type scale (16px root) ---- */
+  --text-display: clamp(2.5rem, 2rem + 2.2vw, 4.25rem);
+  --text-display--line-height: 1.05;
+  --text-h1: clamp(1.875rem, 1.6rem + 1.2vw, 2.75rem);
+  --text-h1--line-height: 1.1;
+  --text-h2: clamp(1.5rem, 1.35rem + 0.7vw, 2rem);
+  --text-h2--line-height: 1.15;
+  --text-h3: clamp(1.25rem, 1.15rem + 0.4vw, 1.5rem);
+  --text-h3--line-height: 1.2;
+  --text-body-lg: 1.125rem;
+  --text-body-lg--line-height: 1.6;
+  --text-body: 1rem;
+  --text-body--line-height: 1.55;
+  --text-body-sm: 0.875rem;
+  --text-body-sm--line-height: 1.5;
+  --text-caption: 0.75rem;
+  --text-caption--line-height: 1.4;
+  --text-mono-lg: 1.5rem;
+  --text-mono-lg--line-height: 1.3;
+  --text-mono: 0.9375rem;
+  --text-mono--line-height: 1.5;
+  --text-mono-sm: 0.8125rem;
+  --text-mono-sm--line-height: 1.45;
+
+  /* ---- Spacing (8px base) ---- */
+  --spacing: 0.25rem;
+
+  /* ---- Radius (none above 12px) ---- */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-full: 999px;
+
+  /* ---- Containers ---- */
+  --container-content: 1240px;
+  --container-narrow: 920px;
+
+  /* ---- Breakpoints ---- */
+  --breakpoint-sm: 480px;
+  --breakpoint-md: 768px;
+  --breakpoint-lg: 1024px;
+  --breakpoint-xl: 1280px;
+  --breakpoint-2xl: 1600px;
+
+  /* ---- Motion ---- */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+}
+
+/* ---- Non-utility custom properties (mixes, elevation, chrome) ---- */
+:root {
+  --accent-wash: rgba(244, 168, 71, 0.08);
+  --accent-glow: rgba(244, 168, 71, 0.12);
+  --focus-ring: var(--color-accent);
+  --nav-h: 60px;
+  color-scheme: dark;
+
+  --elevation-1: 0 0 0 1px var(--color-hairline);
+  --elevation-2:
+    0 0 0 1px var(--color-hairline-strong), 0 0 24px -8px var(--accent-glow);
+  --elevation-modal:
+    0 0 0 1px var(--color-hairline-strong), 0 24px 64px -16px rgba(0, 0, 0, 0.6);
+}
+
+/* ============================================================
+   LIGHT theme — warm paper (opt-in + prefers-color-scheme)
+   Token block duplicated (CSS has no mixins) for the explicit
+   [data-theme="light"] choice and for system light-without-override.
+   ============================================================ */
+:root[data-theme="light"] {
+  --color-void: #f7f5f0;
+  --color-surface: #ffffff;
+  --color-raised: #ffffff;
+  --color-inset: #efede6;
+  --color-hairline: #dedad0;
+  --color-hairline-strong: #c7c2b4;
+  --color-accent: #b87016;
+  --color-accent-dim: #8f5811;
+  --color-primary: #181a22;
+  --color-secondary: #454a58;
+  --color-mute: #5c6070;
+  --color-dim: #767a88;
+  --color-risk-critical: #c0272c;
+  --color-risk-high: #b87016;
+  --color-risk-medium: #8a6a1e;
+  --color-risk-low: #2f7a54;
+  --color-risk-none: #9498a4;
+  --color-author-human: #2f7a54;
+  --color-author-ai: #3e5fc4;
+  --color-author-mixed: #8a6a1e;
+  --accent-wash: rgba(184, 112, 22, 0.08);
+  --accent-glow: rgba(184, 112, 22, 0.1);
+  color-scheme: light;
+  --elevation-1: 0 0 0 1px var(--color-hairline);
+  --elevation-2:
+    0 1px 2px rgba(24, 26, 34, 0.04), 0 4px 12px rgba(24, 26, 34, 0.06);
+  --elevation-modal: 0 16px 48px rgba(24, 26, 34, 0.18);
+}
+
+/* Dark is the unconditional default (brand-native instrument aesthetic).
+   Light is opt-in only, via the theme toggle stamping [data-theme="light"];
+   we deliberately do NOT auto-apply light on prefers-color-scheme, so the
+   signature dark identity is what every first-time visitor sees. */
+
+/* ============================================================
+   Base — inside @layer base so Tailwind utilities (later layer) win.
+   Unlayered element rules would otherwise beat utility classes on <a>, etc.
+   ============================================================ */
+@layer base {
+* {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  min-height: 100dvh;
+  background-color: var(--color-void);
+  color: var(--color-primary);
+  font-family: var(--font-body);
+  font-size: var(--text-body);
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  text-wrap: balance;
+}
+
+code,
+kbd,
+samp,
+pre {
+  font-family: var(--font-mono);
+}
+
+::selection {
+  background: var(--color-accent);
+  color: var(--color-void);
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-inset);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-hairline-strong);
+}
+
+}
+/* close @layer base */
+
+/* Global reduced-motion override (DESIGN-SYSTEM §5) */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Accessible visually-hidden helper */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Skip link — first focusable element, visible on focus */
+.skip-link {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 100;
+  padding: 0.5rem 1rem;
+  background: var(--color-accent);
+  color: var(--color-void);
+  font-family: var(--font-sans);
+  font-weight: 600;
+  transform: translateY(-120%);
+  transition: transform 120ms var(--ease-out);
+}
+.skip-link:focus {
+  transform: translateY(0);
+}
