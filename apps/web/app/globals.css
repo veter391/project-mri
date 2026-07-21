@@ -111,33 +111,34 @@
    [data-theme="light"] choice and for system light-without-override.
    ============================================================ */
 :root[data-theme="light"] {
-  --color-void: #f7f5f0;
-  --color-surface: #ffffff;
-  --color-raised: #ffffff;
-  --color-inset: #efede6;
-  --color-hairline: #dedad0;
-  --color-hairline-strong: #c7c2b4;
-  --color-accent: #b87016;
-  --color-accent-dim: #8f5811;
-  --color-primary: #181a22;
-  --color-secondary: #454a58;
-  --color-mute: #5c6070;
-  --color-dim: #767a88;
-  --color-risk-critical: #c0272c;
-  --color-risk-high: #b87016;
-  --color-risk-medium: #8a6a1e;
-  --color-risk-low: #2f7a54;
-  --color-risk-none: #9498a4;
-  --color-author-human: #2f7a54;
-  --color-author-ai: #3e5fc4;
-  --color-author-mixed: #8a6a1e;
-  --accent-wash: rgba(184, 112, 22, 0.08);
-  --accent-glow: rgba(184, 112, 22, 0.1);
+  /* Warm vintage paper — never pure white; easy on the eyes. */
+  --color-void: #ece4d1;
+  --color-surface: #f5efe2;
+  --color-raised: #f8f3e8;
+  --color-inset: #e2d9c5;
+  --color-hairline: #d3c9b3;
+  --color-hairline-strong: #bbb097;
+  --color-accent: #874b0e;
+  --color-accent-dim: #6d3c0a;
+  --color-primary: #22190f;
+  --color-secondary: #4b4232;
+  --color-mute: #635a46;
+  --color-dim: #7d7460;
+  --color-risk-critical: #a1281d;
+  --color-risk-high: #874b0e;
+  --color-risk-medium: #6f5413;
+  --color-risk-low: #216040;
+  --color-risk-none: #948b76;
+  --color-author-human: #216040;
+  --color-author-ai: #3550ac;
+  --color-author-mixed: #6f5413;
+  --accent-wash: rgba(135, 75, 14, 0.1);
+  --accent-glow: rgba(135, 75, 14, 0.12);
   color-scheme: light;
   --elevation-1: 0 0 0 1px var(--color-hairline);
   --elevation-2:
-    0 1px 2px rgba(24, 26, 34, 0.04), 0 4px 12px rgba(24, 26, 34, 0.06);
-  --elevation-modal: 0 16px 48px rgba(24, 26, 34, 0.18);
+    0 1px 2px rgba(40, 30, 12, 0.05), 0 6px 16px rgba(40, 30, 12, 0.08);
+  --elevation-modal: 0 16px 48px rgba(40, 30, 12, 0.2);
 }
 
 /* Dark is the unconditional default (brand-native instrument aesthetic).

@@ -35,18 +35,25 @@ const FACTS: readonly string[] = [
   "Every number links to the commit, line, or AST node behind it.",
 ];
 
-const CELL = 54; // faint grid cell
-const HOTSPOT_STEP = 5 * CELL; // one fact point per ~270px region
-const REVEAL = 116; // distance at which a hotspot's "?" starts to appear
-const HOVER = 42; // distance at which the fact tooltip triggers
+const CELL = 56; // faint grid cell
+const HOTSPOT_STEP = 7 * CELL; // one fact point per ~390px region — deliberately sparse
+const REVEAL = 118; // distance at which a hotspot's "?" starts to appear
+const HOVER = 46; // distance at which the fact tooltip triggers
 const GLOW = 150; // cursor glow radius
-const AMBER = "244, 168, 71";
+const AMBER_FALLBACK = "244, 168, 71";
 
 type Hotspot = { x: number; y: number; fact: string };
 
 function hash(a: number, b: number): number {
   const h = Math.abs(Math.sin(a * 127.1 + b * 311.7) * 43758.5453);
   return Math.floor((h - Math.floor(h)) * 1000);
+}
+
+// "#rrggbb" -> "r, g, b" (for canvas rgba); tolerant of whitespace.
+function hexToRgb(hex: string): string | null {
+  const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex.trim());
+  if (!m) return null;
+  return `${parseInt(m[1]!, 16)}, ${parseInt(m[2]!, 16)}, ${parseInt(m[3]!, 16)}`;
 }
 
 export function GridField() {
@@ -76,16 +83,29 @@ export function GridField() {
     let lastMove = 0;
     let hotspots: Hotspot[] = [];
 
+    // Colours read from the live theme so the grid, glow and "?" stay visible in
+    // both dark and the light (vintage-paper) theme.
+    let accent = AMBER_FALLBACK;
+    let isLight = false;
+    function readColors() {
+      const cs = getComputedStyle(document.documentElement);
+      accent = hexToRgb(cs.getPropertyValue("--color-accent")) ?? AMBER_FALLBACK;
+      isLight = document.documentElement.getAttribute("data-theme") === "light";
+    }
+
     function seedHotspots() {
       hotspots = [];
       const start = HOTSPOT_STEP / 2;
       for (let gx = start; gx < w; gx += HOTSPOT_STEP) {
         for (let gy = start; gy < h; gy += HOTSPOT_STEP) {
-          // deterministic jitter, snapped to the grid
+          // land each "?" in the CENTRE of a grid cell (not on an intersection),
+          // with a small deterministic jitter across nearby cells.
           const jx = (hash(gx, gy) % 3) - 1;
           const jy = (hash(gx + 17, gy + 31) % 3) - 1;
-          const x = Math.round(gx / CELL + jx) * CELL;
-          const y = Math.round(gy / CELL + jy) * CELL;
+          const col = Math.round(gx / CELL) + jx;
+          const row = Math.round(gy / CELL) + jy;
+          const x = (col + 0.5) * CELL;
+          const y = (row + 0.5) * CELL;
           const fact = FACTS[hash(gx * 3, gy * 7) % FACTS.length] ?? FACTS[0]!;
           hotspots.push({ x, y, fact });
         }
@@ -99,7 +119,7 @@ export function GridField() {
       canvas.width = Math.floor(w * dpr);
       canvas.height = Math.floor(h * dpr);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.font = "600 13px ui-monospace, monospace";
+      ctx.font = "600 16px ui-monospace, monospace";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       seedHotspots();
@@ -108,9 +128,12 @@ export function GridField() {
 
     function drawFrame() {
       ctx.clearRect(0, 0, w, h);
+      const gridA = isLight ? 0.1 : 0.05;
+      const glowA = isLight ? 0.12 : 0.09;
+      const markA = isLight ? 0.95 : 0.72;
 
       // faint base grid
-      ctx.strokeStyle = `rgba(${AMBER}, 0.05)`;
+      ctx.strokeStyle = `rgba(${accent}, ${gridA})`;
       ctx.lineWidth = 1;
       ctx.beginPath();
       for (let x = 0; x <= w; x += CELL) {
@@ -126,18 +149,18 @@ export function GridField() {
       // soft glow following the cursor
       if (mouseX > -9000) {
         const g = ctx.createRadialGradient(mouseX, mouseY, 0, mouseX, mouseY, GLOW);
-        g.addColorStop(0, `rgba(${AMBER}, 0.09)`);
-        g.addColorStop(1, `rgba(${AMBER}, 0)`);
+        g.addColorStop(0, `rgba(${accent}, ${glowA})`);
+        g.addColorStop(1, `rgba(${accent}, 0)`);
         ctx.fillStyle = g;
         ctx.fillRect(mouseX - GLOW, mouseY - GLOW, GLOW * 2, GLOW * 2);
       }
 
-      // "?" only at hotspots, revealed as the glow approaches
+      // "?" only at hotspots (cell-centred), revealed as the glow approaches
       for (const hs of hotspots) {
         const d = Math.hypot(hs.x - mouseX, hs.y - mouseY);
         if (d < REVEAL) {
-          const a = (1 - d / REVEAL) * 0.7;
-          ctx.fillStyle = `rgba(${AMBER}, ${a})`;
+          const a = (1 - d / REVEAL) * markA;
+          ctx.fillStyle = `rgba(${accent}, ${a})`;
           ctx.fillText("?", hs.x, hs.y);
         }
       }
@@ -200,11 +223,25 @@ export function GridField() {
       wake();
     }
 
+    readColors();
     resize();
     window.addEventListener("resize", resize);
 
+    // Re-read theme colours + redraw when the theme toggles.
+    const themeObserver = new MutationObserver(() => {
+      readColors();
+      drawFrame();
+    });
+    themeObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["data-theme"],
+    });
+
     if (reduce || !hover) {
-      return () => window.removeEventListener("resize", resize);
+      return () => {
+        window.removeEventListener("resize", resize);
+        themeObserver.disconnect();
+      };
     }
 
     window.addEventListener("mousemove", onMove, { passive: true });
@@ -214,6 +251,7 @@ export function GridField() {
       window.removeEventListener("resize", resize);
       window.removeEventListener("mousemove", onMove);
       document.removeEventListener("mouseleave", onLeave);
+      themeObserver.disconnect();
       window.clearTimeout(tipTimer);
       if (raf) cancelAnimationFrame(raf);
     };
