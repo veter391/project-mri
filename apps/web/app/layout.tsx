@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { Nav } from "@/components/nav";
+import { ScanField } from "@/components/scan-field";
 import { SiteFooter } from "@/components/site-footer";
 
 const jetbrainsMono = JetBrains_Mono({
@@ -55,6 +56,7 @@ export default function RootLayout({
           // eslint-disable-next-line react/no-danger
           dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
         />
+        <ScanField />
         <Nav />
         {children}
         <SiteFooter />

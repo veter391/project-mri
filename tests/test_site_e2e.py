@@ -87,7 +87,14 @@ def page():
 def test_route_loads_cleanly(base_url: str, page: Page, route: str):
     errors: list[str] = []
     page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
-    page.on("requestfailed", lambda r: errors.append(f"requestfailed {r.url}"))
+    # Ignore benign aborted requests: Next.js prefetches linked routes and cancels
+    # in-flight ones on navigation, which surfaces as ERR_ABORTED — not a real error.
+    page.on(
+        "requestfailed",
+        lambda r: errors.append(f"requestfailed {r.url} ({r.failure})")
+        if "ERR_ABORTED" not in (r.failure or "")
+        else None,
+    )
     resp = page.goto(base_url + route, wait_until="networkidle", timeout=20_000)
     assert resp is not None and resp.status < 400, f"{route} -> HTTP {resp.status if resp else 'no response'}"
     assert not errors, f"{route} console/request errors: {errors[:3]}"

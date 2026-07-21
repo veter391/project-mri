@@ -26,11 +26,18 @@
 }
 
 body {
-  background: var(--color-void);
+  /* Layered ground: a faint amber aurora from the top, a vignette that darkens
+     the edges, over the void — depth behind the drifting node field. */
+  background:
+    radial-gradient(115% 70% at 50% -8%, rgba(244, 168, 71, 0.07), transparent 55%),
+    radial-gradient(130% 120% at 50% 45%, transparent 42%, rgba(0, 0, 0, 0.55)),
+    var(--color-void);
+  background-attachment: fixed;
   color: var(--color-ink);
   font-family: var(--font-mono);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  min-height: 100vh;
 }
 
 /* Subtle CRT scanline overlay — GPU-cheap, the signature terminal look */
