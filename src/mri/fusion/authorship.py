@@ -132,7 +132,7 @@ async def authorship_evidence_for(
         # variable-length IN list, so placeholder expansion is the standard way.
         placeholders = ",".join("?" * len(batch))
         query = (
-            "SELECT "  # noqa: S608 - only `?` placeholders are interpolated; values are bound
+            "SELECT "  # noqa: S608  # nosec B608 - only `?` placeholders are interpolated; values are bound
             "file_path, "
             "sum(CASE WHEN touch_kind IN ('write','create') THEN 1 ELSE 0 END) AS writes, "
             "sum(CASE WHEN touch_kind = 'read' THEN 1 ELSE 0 END) AS reads, "

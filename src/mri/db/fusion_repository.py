@@ -467,7 +467,7 @@ _DECISION_COLUMNS = (
 # these two lines rather than repeated at each call site.
 _DECISION_PLACEHOLDERS = "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?"
 _INSERT_DECISION_SQL = (
-    f"INSERT INTO decisions ({_DECISION_COLUMNS}) VALUES ({_DECISION_PLACEHOLDERS})"  # noqa: S608
+    f"INSERT INTO decisions ({_DECISION_COLUMNS}) VALUES ({_DECISION_PLACEHOLDERS})"  # noqa: S608  # nosec B608 - column names + ? placeholders are module constants, never user input
 )
 _INSERT_OR_IGNORE_DECISION_SQL = (
     f"INSERT OR IGNORE INTO decisions ({_DECISION_COLUMNS}) VALUES ({_DECISION_PLACEHOLDERS})"  # noqa: S608, E501

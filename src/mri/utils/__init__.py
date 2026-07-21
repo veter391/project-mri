@@ -18,7 +18,7 @@ _CONTROL = re.compile(
     r"\x1b\[[0-9;?]*[ -/]*[@-~]"          # ANSI CSI escape sequences
     r"|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)"  # OSC sequences (terminated by BEL or ST)
     r"|[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]"   # C0 controls except tab/newline, and DEL
-    r"|[‪-‮⁦-⁩]"       # bidi embedding/override/isolate controls
+    r"|[‪-‮⁦-⁩]"       # bidi embedding/override/isolate controls  # nosec B613 - the bidi chars ARE the sanitizer's strip-range; this is the defense, not a trojan
 )
 
 

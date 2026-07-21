@@ -326,7 +326,7 @@ async def _decision_ids_for_shas(
         batch = sha_list[start:start + 500]
         placeholders = ",".join("?" * len(batch))
         cursor = await conn.execute(
-            "SELECT commit_sha, id FROM decisions"  # noqa: S608 - placeholders only, values bound
+            "SELECT commit_sha, id FROM decisions"  # noqa: S608  # nosec B608 - placeholders only, values bound
             " WHERE source = 'commit' AND project_id IS ?"
             f" AND commit_sha IN ({placeholders})"
             " AND id NOT IN (SELECT decision_id FROM decision_files)",
