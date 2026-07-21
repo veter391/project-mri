@@ -85,6 +85,8 @@ def test_projects_list(client, tmp_repo):
     assert r.status_code == 200
     data = r.json()
     assert data["count"] >= 1
+    # Each project carries its id, so a client can address /projects/{id}/fusion.
+    assert isinstance(data["projects"][0]["id"], int)
 
 
 def test_scans_list(client):

@@ -221,6 +221,9 @@ class ScanListResponse(BaseModel):
 class ProjectSummary(BaseModel):
     """One project, as listed by GET /api/projects."""
 
+    #: The project's id — clients need it to address per-project routes such as
+    #: GET /api/projects/{id}/fusion.
+    id: int
     path: str
     name: str
     default_branch: str = "main"

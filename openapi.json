@@ -155,6 +155,10 @@
             ],
             "title": "First Scanned"
           },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
           "last_commit": {
             "anyOf": [
               {
@@ -193,6 +197,7 @@
           }
         },
         "required": [
+          "id",
           "path",
           "name"
         ],
@@ -929,6 +934,65 @@
         "summary": "List Projects",
         "tags": [
           "scans"
+        ]
+      }
+    },
+    "/api/projects/{project_id}/fusion": {
+      "get": {
+        "description": "Per-file fusion explanations for a project's riskiest files.\n\nThe files are the hotspots the project's latest scan flagged; each is\nexplained from stored authorship, decision and consequence data. A project\nwith no completed scan simply has no hotspots, and the file list is empty \u2014\nan honest absence, not an error. An unknown project id is a 404.",
+        "operationId": "project_fusion_api_projects__project_id__fusion_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "How many risky files to explain",
+            "in": "query",
+            "name": "top",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "description": "How many risky files to explain",
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Top",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Project Fusion Api Projects  Project Id  Fusion Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Project Fusion",
+        "tags": [
+          "fusion"
         ]
       }
     },

@@ -231,6 +231,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/fusion": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Project Fusion
+         * @description Per-file fusion explanations for a project's riskiest files.
+         *
+         *     The files are the hotspots the project's latest scan flagged; each is
+         *     explained from stored authorship, decision and consequence data. A project
+         *     with no completed scan simply has no hotspots, and the file list is empty —
+         *     an honest absence, not an error. An unknown project id is a 404.
+         */
+        get: operations["project_fusion_api_projects__project_id__fusion_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/scans": {
         parameters: {
             query?: never;
@@ -468,6 +493,8 @@ export interface components {
             file_count: number;
             /** First Scanned */
             first_scanned?: string | null;
+            /** Id */
+            id: number;
             /** Last Commit */
             last_commit?: string | null;
             /** Last Scanned */
@@ -933,6 +960,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProjectListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    project_fusion_api_projects__project_id__fusion_get: {
+        parameters: {
+            query?: {
+                /** @description How many risky files to explain */
+                top?: number;
+            };
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
                 };
             };
             /** @description Validation Error */
