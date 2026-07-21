@@ -3,20 +3,17 @@
 import { useEffect, useRef } from "react";
 
 /**
- * Signature interactive background: a square grid that reveals amber "?" glyphs
- * around the cursor as it moves, and — when the cursor dwells on a cell — floats
- * a tooltip with a real, inspectable fact about MRI or its problem domain
- * ("facts over magic scores", made ambient).
+ * Signature interactive background: a faint square grid with a soft amber glow
+ * that follows the cursor. Sparse "hotspot" points across the grid each hold one
+ * real, checkable fact about MRI or its domain; a "?" fades in on a hotspot only
+ * as the glow approaches it (never on every cell), and dwelling on one floats its
+ * fact as a tooltip — "facts over magic scores", made ambient and unobtrusive.
  *
- * Constraints honored:
- *  - `pointer-events: none` + window-level mousemove, so it NEVER blocks content.
- *  - Decorative: aria-hidden, keyboard-irrelevant.
- *  - Disabled on touch / no-hover devices and under prefers-reduced-motion
- *    (renders a single static faint grid, no reveal, no tooltip).
- *  - rAF runs only while there is activity, then parks.
+ * Constraints: pointer-events:none + window-level mousemove (never blocks
+ * content); decorative (aria-hidden); disabled on touch/no-hover and under
+ * prefers-reduced-motion (static grid only); rAF parks when idle.
  */
 
-// Each fact is short, true, and checkable — sourced in the repo docs.
 const FACTS: readonly string[] = [
   "Hotspot = commits × (1 + √churn / 10).",
   "Bus factor = the fewest authors covering 80% of change.",
@@ -38,13 +35,18 @@ const FACTS: readonly string[] = [
   "Every number links to the commit, line, or AST node behind it.",
 ];
 
-const CELL = 54;
-const RADIUS = 130;
+const CELL = 54; // faint grid cell
+const HOTSPOT_STEP = 5 * CELL; // one fact point per ~270px region
+const REVEAL = 116; // distance at which a hotspot's "?" starts to appear
+const HOVER = 42; // distance at which the fact tooltip triggers
+const GLOW = 150; // cursor glow radius
 const AMBER = "244, 168, 71";
 
-function hashCell(col: number, row: number): number {
-  const h = Math.abs(Math.sin(col * 127.1 + row * 311.7) * 43758.5453);
-  return Math.floor((h - Math.floor(h)) * FACTS.length);
+type Hotspot = { x: number; y: number; fact: string };
+
+function hash(a: number, b: number): number {
+  const h = Math.abs(Math.sin(a * 127.1 + b * 311.7) * 43758.5453);
+  return Math.floor((h - Math.floor(h)) * 1000);
 }
 
 export function GridField() {
@@ -57,9 +59,7 @@ export function GridField() {
     if (!canvasEl || !tipEl) return;
     const context = canvasEl.getContext("2d");
     if (!context) return;
-    // Typed non-null consts so control-flow narrowing survives inside the
-    // closures below (TS does not preserve guard narrowing across function
-    // boundaries otherwise).
+    // Typed non-null consts so narrowing survives inside the closures below.
     const canvas: HTMLCanvasElement = canvasEl;
     const tip: HTMLDivElement = tipEl;
     const ctx: CanvasRenderingContext2D = context;
@@ -74,8 +74,23 @@ export function GridField() {
     let mouseX = -9999;
     let mouseY = -9999;
     let lastMove = 0;
-    // per-cell activation (keyed "col,row") with decaying intensity
-    const active = new Map<string, number>();
+    let hotspots: Hotspot[] = [];
+
+    function seedHotspots() {
+      hotspots = [];
+      const start = HOTSPOT_STEP / 2;
+      for (let gx = start; gx < w; gx += HOTSPOT_STEP) {
+        for (let gy = start; gy < h; gy += HOTSPOT_STEP) {
+          // deterministic jitter, snapped to the grid
+          const jx = (hash(gx, gy) % 3) - 1;
+          const jy = (hash(gx + 17, gy + 31) % 3) - 1;
+          const x = Math.round(gx / CELL + jx) * CELL;
+          const y = Math.round(gy / CELL + jy) * CELL;
+          const fact = FACTS[hash(gx * 3, gy * 7) % FACTS.length] ?? FACTS[0]!;
+          hotspots.push({ x, y, fact });
+        }
+      }
+    }
 
     function resize() {
       dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -87,14 +102,14 @@ export function GridField() {
       ctx.font = "600 13px ui-monospace, monospace";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      // Resizing the bitmap implicitly clears it; redraw so the grid survives a
-      // window/orientation resize even when the rAF loop is parked or absent
-      // (reduced-motion / no-hover static path).
-      drawBaseGrid();
+      seedHotspots();
+      drawFrame();
     }
 
-    function drawBaseGrid() {
+    function drawFrame() {
       ctx.clearRect(0, 0, w, h);
+
+      // faint base grid
       ctx.strokeStyle = `rgba(${AMBER}, 0.05)`;
       ctx.lineWidth = 1;
       ctx.beginPath();
@@ -107,54 +122,38 @@ export function GridField() {
         ctx.lineTo(w, y + 0.5);
       }
       ctx.stroke();
+
+      // soft glow following the cursor
+      if (mouseX > -9000) {
+        const g = ctx.createRadialGradient(mouseX, mouseY, 0, mouseX, mouseY, GLOW);
+        g.addColorStop(0, `rgba(${AMBER}, 0.09)`);
+        g.addColorStop(1, `rgba(${AMBER}, 0)`);
+        ctx.fillStyle = g;
+        ctx.fillRect(mouseX - GLOW, mouseY - GLOW, GLOW * 2, GLOW * 2);
+      }
+
+      // "?" only at hotspots, revealed as the glow approaches
+      for (const hs of hotspots) {
+        const d = Math.hypot(hs.x - mouseX, hs.y - mouseY);
+        if (d < REVEAL) {
+          const a = (1 - d / REVEAL) * 0.7;
+          ctx.fillStyle = `rgba(${AMBER}, ${a})`;
+          ctx.fillText("?", hs.x, hs.y);
+        }
+      }
     }
 
-    function frame() {
-      drawBaseGrid();
-      // seed activation for cells near the cursor
-      const c0 = Math.floor((mouseX - RADIUS) / CELL);
-      const c1 = Math.floor((mouseX + RADIUS) / CELL);
-      const r0 = Math.floor((mouseY - RADIUS) / CELL);
-      const r1 = Math.floor((mouseY + RADIUS) / CELL);
-      for (let col = c0; col <= c1; col++) {
-        for (let row = r0; row <= r1; row++) {
-          const cx = col * CELL + CELL / 2;
-          const cy = row * CELL + CELL / 2;
-          const d = Math.hypot(cx - mouseX, cy - mouseY);
-          if (d < RADIUS) {
-            const target = 1 - d / RADIUS;
-            const key = `${col},${row}`;
-            active.set(key, Math.max(active.get(key) ?? 0, target));
-          }
-        }
-      }
-      // draw + decay
-      let anyAlive = false;
-      for (const [key, val] of active) {
-        const next = val - 0.02;
-        if (next <= 0.01) {
-          active.delete(key);
-          continue;
-        }
-        anyAlive = true;
-        active.set(key, next);
-        const [colS, rowS] = key.split(",");
-        const col = Number(colS);
-        const row = Number(rowS);
-        const cx = col * CELL + CELL / 2;
-        const cy = row * CELL + CELL / 2;
-        ctx.fillStyle = `rgba(${AMBER}, ${next * 0.55})`;
-        ctx.fillText("?", cx, cy);
-      }
-      if (anyAlive || performance.now() - lastMove < 120) {
-        raf = requestAnimationFrame(frame);
+    function loop() {
+      drawFrame();
+      // keep animating briefly after the last movement, then park
+      if (performance.now() - lastMove < 140) {
+        raf = requestAnimationFrame(loop);
       } else {
         raf = 0;
       }
     }
-
     function wake() {
-      if (!raf) raf = requestAnimationFrame(frame);
+      if (!raf) raf = requestAnimationFrame(loop);
     }
 
     let tipTimer = 0;
@@ -163,23 +162,34 @@ export function GridField() {
       mouseY = e.clientY;
       lastMove = performance.now();
       wake();
-      // dwell → fact tooltip
+
+      // nearest hotspot within HOVER → show its fact after a short dwell
+      let near: Hotspot | null = null;
+      let best = HOVER;
+      for (const hs of hotspots) {
+        const d = Math.hypot(hs.x - mouseX, hs.y - mouseY);
+        if (d < best) {
+          best = d;
+          near = hs;
+        }
+      }
       window.clearTimeout(tipTimer);
-      tip.style.opacity = "0";
+      if (!near) {
+        tip.style.opacity = "0";
+        return;
+      }
+      const target = near;
       tipTimer = window.setTimeout(() => {
-        const col = Math.floor(mouseX / CELL);
-        const row = Math.floor(mouseY / CELL);
-        const fact = FACTS[hashCell(col, row)] ?? FACTS[0]!;
-        tip.textContent = fact;
+        tip.textContent = target.fact;
         const tw = 260;
-        let tx = mouseX + 18;
-        if (tx + tw > window.innerWidth - 12) tx = mouseX - tw - 18;
-        let ty = mouseY + 18;
-        if (ty + 80 > window.innerHeight - 12) ty = mouseY - 64;
+        let tx = target.x + 22;
+        if (tx + tw > window.innerWidth - 12) tx = target.x - tw - 22;
+        let ty = target.y + 16;
+        if (ty + 80 > window.innerHeight - 12) ty = target.y - 64;
         tip.style.left = `${Math.max(12, tx)}px`;
         tip.style.top = `${Math.max(12, ty)}px`;
         tip.style.opacity = "1";
-      }, 260);
+      }, 140);
     }
 
     function onLeave() {
@@ -187,19 +197,18 @@ export function GridField() {
       mouseY = -9999;
       window.clearTimeout(tipTimer);
       tip.style.opacity = "0";
+      wake();
     }
 
     resize();
     window.addEventListener("resize", resize);
 
     if (reduce || !hover) {
-      drawBaseGrid();
       return () => window.removeEventListener("resize", resize);
     }
 
     window.addEventListener("mousemove", onMove, { passive: true });
     document.addEventListener("mouseleave", onLeave);
-    drawBaseGrid();
 
     return () => {
       window.removeEventListener("resize", resize);
