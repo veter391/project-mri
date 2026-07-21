@@ -52,7 +52,9 @@ def build_fixture_repo(root: Path) -> Path:
     a nested function, a growing file (churn), and a second module.
     """
     root.mkdir(parents=True, exist_ok=True)
-    _git(root, "init", "-q")
+    # -b main pins the branch name: `git init` alone inherits the machine's
+    # init.defaultBranch, which made the baseline differ between local and CI.
+    _git(root, "init", "-q", "-b", "main")
     _git(root, "config", "user.email", "t@t")
     _git(root, "config", "user.name", "t")
     _write(root / "app.py", "def a():\n    return 1\n\n\ndef b(x):\n    if x:\n        return x * 2\n    return 0\n")
