@@ -76,6 +76,11 @@ _DEFAULT_CONFIG: dict[str, Any] = {
         "cache_dir": None,  # ~/.cache/project-mri/repos
         "auto_cleanup": True,
         "keep_clones": False,  # delete clones after scan
+        # Sandbox quotas — fail closed if a clone exceeds either cap. 0 disables
+        # a cap. Enforced post-clone (git has no reliable hard byte cap mid-clone).
+        "default_depth": 50,  # shallow-clone depth when the caller passes none; 0 = full history
+        "max_clone_bytes": 524_288_000,  # 500 MiB on-disk cap for a single clone
+        "max_clone_files": 50_000,  # max file count for a single clone
     },
     "watch": {
         "debounce_seconds": 2.0,

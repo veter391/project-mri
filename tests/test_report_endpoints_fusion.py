@@ -17,7 +17,7 @@ from mri.api.app import create_app
 from mri.db import repository
 from mri.db.migrator import migrate
 from mri.db.repository import connect_sync, persist_report
-from mri.services.scanner import ScanOptions, Scanner
+from mri.services.scanner import Scanner, ScanOptions
 from tests.golden import build_fixture_repo
 
 

@@ -19,7 +19,9 @@ import os
 import re
 import shutil
 import socket
+import stat
 import subprocess  # nosec B404
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -34,6 +36,13 @@ logger = logging.getLogger("mri.cloner")
 # in config, or the configured self-hosted GitLab URL. This is the primary
 # guard against SSRF / cloning from arbitrary or internal endpoints.
 _DEFAULT_ALLOWED_HOSTS = ("github.com", "gitlab.com", "bitbucket.org")
+
+# Sandbox quotas. Fallbacks used only when a config value is absent; the merged
+# config normally supplies these from `clones.*` (see config._DEFAULT_CONFIG).
+# A depth of 0 (or a falsy value) means "full history"; a cap of 0 disables it.
+_DEFAULT_CLONE_DEPTH = 50  # shallow-clone depth when the caller passes none
+_DEFAULT_MAX_CLONE_BYTES = 524_288_000  # 500 MiB
+_DEFAULT_MAX_CLONE_FILES = 50_000
 
 
 # ---------------------------------------------------------------------------
@@ -277,6 +286,100 @@ def _validate_clone_target(repo: RepoUrl, config: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Sandbox quotas (on-disk size / file-count caps)
+# ---------------------------------------------------------------------------
+
+
+def _robust_rmtree(path: Path) -> None:
+    """Delete a tree even when it holds read-only files.
+
+    Git marks pack files inside `.git` read-only, and on Windows ``os.remove``
+    refuses to unlink a read-only file — so ``shutil.rmtree(ignore_errors=True)``
+    silently leaves a rejected clone on disk, defeating the fail-closed guarantee.
+    This retries each failed entry after clearing the read-only bit.
+    """
+    def _clear_readonly(func: Any, target: str, _exc: Any) -> None:
+        try:
+            os.chmod(target, stat.S_IWRITE)
+            func(target)
+        except OSError:
+            pass  # best effort; the CloneError still surfaces to the caller
+
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(path, onexc=_clear_readonly)
+    else:  # pragma: no cover - onerror is removed in 3.14+; kept for older runtimes
+        shutil.rmtree(
+            path,
+            onerror=lambda func, target, _exc: _clear_readonly(func, target, None),
+        )
+
+
+def _clone_quota(config: dict) -> tuple[int, int]:
+    """Return the (max_bytes, max_files) caps for a single clone.
+
+    Read from `clones.max_clone_bytes` / `clones.max_clone_files`, falling back
+    to the module defaults when a key is absent. A value of 0 disables that cap.
+    """
+    clones = config.get("clones", {}) or {}
+    max_bytes = clones.get("max_clone_bytes", _DEFAULT_MAX_CLONE_BYTES)
+    max_files = clones.get("max_clone_files", _DEFAULT_MAX_CLONE_FILES)
+    return int(max_bytes), int(max_files)
+
+
+def _directory_stats(path: Path) -> tuple[int, int]:
+    """Return (total_bytes, file_count) for everything under `path`.
+
+    Counts the whole on-disk footprint, including `.git`, because that is the
+    disk a hostile repo actually consumes. Symlinked directories are not
+    descended into (``os.walk`` default), so this cannot be sent into a loop.
+    """
+    total_bytes = 0
+    file_count = 0
+    for root, _dirs, files in os.walk(path):
+        for fname in files:
+            fpath = os.path.join(root, fname)
+            try:
+                total_bytes += os.path.getsize(fpath)
+            except OSError:
+                # A vanished/unreadable entry still counts toward the file cap.
+                pass
+            file_count += 1
+    return total_bytes, file_count
+
+
+def _enforce_clone_quota(local_path: Path, config: dict) -> None:
+    """Fail closed if the clone at `local_path` exceeds its size/file caps.
+
+    Enforced *after* the clone lands: git offers no reliable hard byte cap
+    mid-clone (``--filter`` shapes a partial clone but does not abort on a
+    threshold), so the honest control is to measure the result and, if it is
+    over budget, delete it and raise. A rejected clone must not be left on disk.
+    """
+    max_bytes, max_files = _clone_quota(config)
+    if max_bytes <= 0 and max_files <= 0:
+        return  # both caps disabled
+    total_bytes, file_count = _directory_stats(local_path)
+    reason: str | None = None
+    if max_bytes > 0 and total_bytes > max_bytes:
+        reason = f"on-disk size {total_bytes} bytes exceeds cap of {max_bytes} bytes"
+    elif max_files > 0 and file_count > max_files:
+        reason = f"file count {file_count} exceeds cap of {max_files} files"
+    if reason is not None:
+        _robust_rmtree(local_path)
+        logger.error(
+            "clone.quota_exceeded",
+            extra={
+                "event": "clone.quota_exceeded",
+                "path": str(local_path),
+                "reason": reason,
+            },
+        )
+        raise CloneError(
+            f"cloned repository rejected: {reason}. The partial clone was deleted."
+        )
+
+
+# ---------------------------------------------------------------------------
 # Clone operation
 # ---------------------------------------------------------------------------
 
@@ -297,7 +400,10 @@ def clone_repo(
     Args:
         url: remote git URL (https or SSH)
         branch: branch to clone (defaults to repo's default)
-        depth: shallow clone depth (1 = latest only, None = full history)
+        depth: shallow clone depth (1 = latest only). None applies the
+            configured shallow default (`clones.default_depth`, 50) so a huge
+            repo's whole history is not fetched by accident; pass 0 for full
+            history.
         force_refresh: if True, delete cached clone and re-clone
 
     Returns:
@@ -309,6 +415,10 @@ def clone_repo(
     config = get_config()
     repo = parse_repo_url(url)
     _validate_clone_target(repo, config)
+    # Resolve the effective depth: None -> configured shallow default so we never
+    # silently fetch full history; 0 (or any falsy override) -> full history.
+    if depth is None:
+        depth = int((config.get("clones", {}) or {}).get("default_depth", _DEFAULT_CLONE_DEPTH))
     cache_dir = _default_cache_dir()
     cache_dir.mkdir(parents=True, exist_ok=True)
     local_path = _url_to_cache_path(url, cache_dir)
@@ -328,15 +438,20 @@ def clone_repo(
             else:
                 _run_git("fetch", "--depth", str(depth or 1), "origin", cwd=local_path)
                 _run_git("reset", "--hard", "FETCH_HEAD", cwd=local_path)
+        except CloneError:
+            # Update failed — fall through to fresh clone
+            shutil.rmtree(local_path, ignore_errors=True)
+        else:
+            # Quota check on the else branch (not inside the try): a quota
+            # rejection must propagate to the caller, not trigger a full
+            # re-clone that would only exceed the same cap again.
+            _enforce_clone_quota(local_path, config)
             _record_clone(url, local_path)
             logger.info(
                 "clone.updated",
                 extra={"event": "clone.updated", "url": url, "path": str(local_path)},
             )
             return local_path
-        except CloneError:
-            # Update failed — fall through to fresh clone
-            shutil.rmtree(local_path, ignore_errors=True)
 
     # Fresh clone
     if local_path.exists():
@@ -377,6 +492,9 @@ def clone_repo(
             extra={"event": "clone.failed", "url": url, "error": str(e)},
         )
         raise
+
+    # Fail closed if the freshly cloned repo blows past its size/file caps.
+    _enforce_clone_quota(local_path, config)
 
     # Detect default branch if not specified
     if not branch:
