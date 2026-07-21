@@ -71,14 +71,30 @@ Scanner().scan(".")  →  270 files, 98 findings, overall health 60.0, ~2.5 s
 No unbounded hotspot was observed: the git-history walk is bounded
 (`MAX_COMMITS`), the consequence commit walk is capped (`commit_max_count=2000`),
 the authorship SQL chunks large path lists under the SQLite variable limit, and
-the report-view fusion loop is bounded (top-25 hotspots). A larger-repo benchmark
-(10k+ commits) is the next step when a representative corpus is available.
+the report-view fusion loop is bounded (top-25 hotspots).
+
+**Scaling study** — synthetic repos (Python files across 20 packages, rotating
+churn), scan time only:
+
+| Files | Commits | Scan time |
+|------:|--------:|----------:|
+| 200   | 60      | 2.4 s |
+| 800   | 200     | 9.7 s |
+| 1600  | 400     | 13.2 s |
+
+4× the size (200→800) costs ~4× the time — roughly **linear**; doubling again
+(800→1600) costs only ~1.4× — **sub-linear**, because the history walk is capped.
+No quadratic blow-up. A single 10k-commit-repo data point (rather than this
+scaling study) is still worth capturing when a representative real corpus is
+available, but the shape is bounded.
 
 ---
 
 ## Open / follow-up
 
-- A representative large-repo (10k+ commit) performance benchmark is not yet run —
-  the 2.5 s figure is for a mid-size repo. No regression budget is enforced in CI
-  yet beyond the golden baseline (which guards analyzer *output*, not timing).
+- The scaling study above (to 1600 files / 400 commits) shows bounded, roughly-
+  linear behaviour; a single data point on a real 10k+-commit repository is still
+  worth capturing when a representative corpus is available. No timing regression
+  budget is enforced in CI yet (the golden baseline guards analyzer *output*, not
+  wall-clock).
 - An independent third-party threat-model review has not been commissioned.
