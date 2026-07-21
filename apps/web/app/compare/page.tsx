@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { PageHeader } from "@/components/ui/page-header";
 import { Container, Section, SectionHeader } from "@/components/ui/container";
 import { Card } from "@/components/ui/card";
+import { TerminalWindow } from "@/components/ui/terminal-window";
 import { ButtonLink } from "@/components/ui/button";
 import { SITE } from "@/lib/site";
 import { ArrowUpRightIcon } from "@/components/icons";
@@ -138,7 +139,14 @@ export default function ComparePage() {
             lede="The closest peer is Repowise (AGPL + paid). The white space is narrow and specific: session-log prompt-level attribution fused with risk decomposition, a decision-to-consequence loop, and a genuinely permissive MIT-forever license. MRI competes on completeness and trust — not on a claim that no one else is in this space."
           />
 
-          <div className="mt-8 overflow-x-auto">
+          <TerminalWindow
+            title="neighborhood.csv"
+            meta="last verified 2026-07"
+            tone="surface"
+            bodyClassName="p-0"
+            className="mt-8"
+          >
+          <div className="overflow-x-auto p-5">
             <table className="w-full min-w-[720px] border-collapse text-left">
               <caption className="sr-only">
                 Capability comparison of MRI, Repowise, structure-graph tools, and
@@ -192,6 +200,7 @@ export default function ComparePage() {
               </tbody>
             </table>
           </div>
+          </TerminalWindow>
           <p className="text-mute mt-3 font-mono text-mono-sm">
             <span className="text-risk-low">✓</span> yes ·{" "}
             <span className="text-risk-medium">~</span> partial ·{" "}
