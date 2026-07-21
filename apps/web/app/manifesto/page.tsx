@@ -4,6 +4,7 @@ import { Container, Section } from "@/components/ui/container";
 import { ButtonLink } from "@/components/ui/button";
 import { SITE } from "@/lib/site";
 import { ArrowUpRightIcon } from "@/components/icons";
+import { Watermark } from "@/components/ui/watermark";
 
 export const metadata: Metadata = {
   title: "Manifesto",
@@ -43,25 +44,31 @@ export default function ManifestoPage() {
         title="Four convictions. Stated once, plainly."
         lede="MRI is a diagnostic instrument pointed at a codebase. An instrument you can't inspect is one you can't trust — so these are not slogans. Each is a decision that shows up in the code."
       />
-      <Section>
-        <Container narrow>
-          <ol className="flex flex-col gap-px overflow-hidden rounded-lg">
-            {PILLARS.map((p) => (
+      <Section className="pt-4 md:pt-6">
+        <Container>
+          <ol className="flex flex-col">
+            {PILLARS.map((p, i) => (
               <li
                 key={p.n}
-                className="border-hairline bg-surface border p-7 md:p-9"
+                className="border-hairline relative border-t py-12 first:border-t-0 md:py-16"
               >
-                <div className="flex items-baseline gap-4">
-                  <span className="text-accent font-mono text-mono-lg font-semibold">
-                    {p.n}
-                  </span>
-                  <h2 className="text-[length:var(--text-h3)] leading-[var(--text-h3--line-height)] font-semibold">
+                <Watermark text={p.n} className="-top-5 right-0 h-32 md:h-44" />
+                <div
+                  className={
+                    i % 2 === 1 ? "max-w-[60ch] lg:ml-[20%]" : "max-w-[60ch]"
+                  }
+                >
+                  <p className="font-mono text-mono-sm">
+                    <span className="text-accent">{p.n}</span>
+                    <span className="text-mute"> / 04</span>
+                  </p>
+                  <h2 className="mt-3 text-[length:var(--text-h2)] leading-[var(--text-h2--line-height)] font-semibold text-balance">
                     {p.title}
                   </h2>
+                  <p className="text-secondary mt-4 font-body text-body-lg leading-relaxed text-pretty">
+                    {p.body}
+                  </p>
                 </div>
-                <p className="text-secondary mt-4 font-body text-body-lg leading-relaxed">
-                  {p.body}
-                </p>
               </li>
             ))}
           </ol>

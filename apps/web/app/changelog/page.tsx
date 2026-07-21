@@ -63,9 +63,14 @@ export default function ChangelogPage() {
                   {r.notes.map((n) => (
                     <li
                       key={n}
-                      className="text-secondary flex gap-2 font-body text-body leading-relaxed"
+                      className="text-secondary flex gap-3 font-body text-body leading-relaxed"
                     >
-                      <span className="text-accent mt-1 font-mono text-mono-sm">→</span>
+                      <span
+                        aria-hidden="true"
+                        className="text-risk-low mt-0.5 font-mono text-mono select-none"
+                      >
+                        +
+                      </span>
                       {n}
                     </li>
                   ))}

@@ -5,6 +5,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ButtonLink } from "@/components/ui/button";
 import { CodePanel, Prompt, Comment, Out } from "@/components/ui/code-panel";
+import { TerminalWindow } from "@/components/ui/terminal-window";
 import { RiskRing } from "@/components/viz/risk-ring";
 import { AuthorshipSplitBar } from "@/components/viz/authorship-split-bar";
 import { SessionTraceCard } from "@/components/viz/session-trace-card";
@@ -40,11 +41,21 @@ export default function DemoPage() {
 
       <Section>
         <Container>
-          <div className="mb-6 flex flex-wrap items-center gap-3">
+          <TerminalWindow
+            title="mri serve → http://localhost:7331/dashboard/"
+            meta="preview build"
+            tone="raised"
+            bodyClassName="p-4 md:p-6"
+          >
+          <div className="border-hairline mb-5 flex flex-wrap items-center gap-3 border-b pb-4">
             <Badge tone="accent">Limited preview</Badge>
             <Badge tone="neutral">Illustrative data · labeled</Badge>
             <span className="text-mute font-mono text-mono-sm">
-              example-org/service · representative repository
+              example-org/service
+            </span>
+            <span className="text-risk-low ml-auto hidden items-center gap-1.5 font-mono text-mono-sm sm:inline-flex">
+              <span className="bg-risk-low inline-block h-1.5 w-1.5 rounded-full" />
+              local · 0 egress
             </span>
           </div>
 
@@ -114,6 +125,7 @@ export default function DemoPage() {
               </p>
             </div>
           </div>
+          </TerminalWindow>
         </Container>
       </Section>
 
