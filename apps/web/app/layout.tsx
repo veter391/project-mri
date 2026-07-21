@@ -23,6 +23,25 @@ export const metadata: Metadata = {
   },
 };
 
+// Minimal, accurate structured data. No ratings/prices — the tool is free, MIT-licensed.
+const jsonLd = {
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  name: "project-mri",
+  applicationCategory: "DeveloperApplication",
+  operatingSystem: "Cross-platform",
+  description:
+    "Open-source, agent-native engine that mines Git history and structure into explainable code-health scores. Local-first developer tool.",
+  license: "https://opensource.org/licenses/MIT",
+  isAccessibleForFree: true,
+  offers: {
+    "@type": "Offer",
+    price: "0",
+    priceCurrency: "USD",
+  },
+  url: "https://github.com/veter391/project-mri",
+} as const;
+
 export default function RootLayout({
   children,
 }: {
@@ -31,6 +50,11 @@ export default function RootLayout({
   return (
     <html lang="en" className={jetbrainsMono.variable}>
       <body>
+        <script
+          type="application/ld+json"
+          // eslint-disable-next-line react/no-danger
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+        />
         <Nav />
         {children}
         <SiteFooter />
