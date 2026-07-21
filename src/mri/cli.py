@@ -214,7 +214,6 @@ def fusion(project_path: str, top: int, store_content: bool, json_out: str | Non
     to explain.
     """
     import asyncio
-    import json as _json
 
     click.echo(f"→ fusing agent provenance onto {project_path}", err=True)
 
@@ -266,19 +265,35 @@ def fusion(project_path: str, top: int, store_content: bool, json_out: str | Non
             click.echo(exp.prose)
 
         if json_out:
-            payload = {
-                "ingest": {"sessions": report.ingest.sessions, "touches": report.ingest.touches},
-                "correlation": {"linked": report.correlation.linked,
-                                "commits": len(report.correlation.commits)},
-                "decisions": {"adr": report.adrs, "commit": report.commits,
-                              "cross_links": report.decision_links},
-                "files": [
-                    {"file": e.file_path, "prose": e.prose,
-                     "factors": [{"name": f.name, "value": f.value} for f in e.factors]}
+            from mri.models.cli_json import (
+                FusionCorrelationJson,
+                FusionDecisionsJson,
+                FusionFactorJson,
+                FusionFileJson,
+                FusionIngestJson,
+                FusionJson,
+            )
+
+            payload = FusionJson(
+                ingest=FusionIngestJson(
+                    sessions=report.ingest.sessions, touches=report.ingest.touches
+                ),
+                correlation=FusionCorrelationJson(
+                    linked=report.correlation.linked, commits=len(report.correlation.commits)
+                ),
+                decisions=FusionDecisionsJson(
+                    adr=report.adrs, commit=report.commits, cross_links=report.decision_links
+                ),
+                authored_files=report.authored_files,
+                files=[
+                    FusionFileJson(
+                        file=e.file_path, prose=e.prose,
+                        factors=[FusionFactorJson(name=f.name, value=f.value) for f in e.factors],
+                    )
                     for e in report.explanations
                 ],
-            }
-            Path(json_out).write_text(_json.dumps(payload, indent=2), encoding="utf-8")
+            )
+            Path(json_out).write_text(payload.model_dump_json(indent=2), encoding="utf-8")
             if not quiet:
                 click.echo(f"  ✓ JSON → {json_out}", err=True)
 
@@ -302,7 +317,6 @@ def eval_cmd(json_out: str | None) -> None:
     any honesty invariant is violated — this is the hard gate.
     """
     import asyncio
-    import json as _json
 
     async def go() -> None:
         from mri.eval import run_eval
@@ -319,18 +333,23 @@ def eval_cmd(json_out: str | None) -> None:
             click.echo(f"    ✗ {v.rule}: {v.detail} ({v.ref})", err=True)
 
         if json_out:
-            payload = {
-                "case": report.case,
-                "calibration": {
-                    p: {"expected": e, "computed": c, "error": err}
+            from mri.models.cli_json import CalibrationEntryJson, EvalJson, ViolationJson
+
+            payload = EvalJson(
+                case=report.case,
+                calibration={
+                    p: CalibrationEntryJson(expected=e, computed=c, error=err)
                     for p, (e, c, err) in report.calibration.items()
                 },
-                "correlation_recall": report.correlation_recall,
-                "violations": [{"rule": v.rule, "detail": v.detail, "ref": v.ref}
-                               for v in report.violations],
-                "passed": report.passed,
-            }
-            Path(json_out).write_text(_json.dumps(payload, indent=2), encoding="utf-8")
+                correlation_recall=report.correlation_recall,
+                consequence_false_positive_rate=report.consequence_false_positive_rate,
+                violations=[
+                    ViolationJson(rule=v.rule, detail=v.detail, ref=v.ref)
+                    for v in report.violations
+                ],
+                passed=report.passed,
+            )
+            Path(json_out).write_text(payload.model_dump_json(indent=2), encoding="utf-8")
 
         if report.passed:
             click.echo("✓ eval passed: numbers calibrated, no over-claim", err=True)

@@ -162,3 +162,9 @@ def test_mri_eval_cli_passes_and_gates(tmp_path: Path):
     payload = json.loads(out.read_text(encoding="utf-8"))
     assert payload["passed"] is True
     assert payload["calibration"]["ai_all.py"]["computed"] == pytest.approx(100.0, abs=2.0)
+    # 9.1: the JSON validates against its model and carries the consequence FP rate
+    # (the hand-built dict omitted it after Phase 10).
+    from mri.models.cli_json import EvalJson
+
+    assert payload["consequence_false_positive_rate"] == 0.0
+    EvalJson.model_validate(payload)

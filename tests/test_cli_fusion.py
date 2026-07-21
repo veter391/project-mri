@@ -110,6 +110,12 @@ def test_fusion_command_json_out(repo: Path, tmp_path: Path):
     assert "files" in payload
     assert payload["files"][0]["file"] == "app.py"
     assert "prose" in payload["files"][0]
+    # 9.1: the payload validates against its model (and carries authored_files,
+    # which the old hand-built dict omitted).
+    from mri.models.cli_json import FusionJson
+
+    model = FusionJson.model_validate(payload)
+    assert model.authored_files == payload["authored_files"]
 
 
 def test_fusion_on_a_non_git_directory_fails_cleanly(tmp_path: Path):
