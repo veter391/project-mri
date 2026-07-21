@@ -3,15 +3,19 @@
 import { useEffect, useRef } from "react";
 
 /**
- * Signature interactive background: a faint square grid with a soft amber glow
- * that follows the cursor. Sparse "hotspot" points across the grid each hold one
- * real, checkable fact about MRI or its domain; a "?" fades in on a hotspot only
- * as the glow approaches it (never on every cell), and dwelling on one floats its
- * fact as a tooltip — "facts over magic scores", made ambient and unobtrusive.
+ * Signature interactive background: a faint square grid that comes alive under
+ * the cursor. Grid intersections inside a lens radius bloom into amber dots and
+ * are pushed gently outward — a subtle magnifying-lens / wave distortion that
+ * tracks the pointer. Sparse "hotspot" points each carry one real, checkable
+ * fact that surfaces as a tooltip on dwell.
+ *
+ * Optimized: the static grid is rendered once into an offscreen canvas and
+ * blitted each frame; only the bounded region around the cursor is computed
+ * per frame, and the rAF loop parks when idle.
  *
  * Constraints: pointer-events:none + window-level mousemove (never blocks
  * content); decorative (aria-hidden); disabled on touch/no-hover and under
- * prefers-reduced-motion (static grid only); rAF parks when idle.
+ * prefers-reduced-motion (static grid only).
  */
 
 const FACTS: readonly string[] = [
@@ -35,11 +39,12 @@ const FACTS: readonly string[] = [
   "Every number links to the commit, line, or AST node behind it.",
 ];
 
-const CELL = 56; // faint grid cell
-const HOTSPOT_STEP = 7 * CELL; // one fact point per ~390px region — deliberately sparse
-const REVEAL = 118; // distance at which a hotspot's "?" starts to appear
-const HOVER = 46; // distance at which the fact tooltip triggers
-const GLOW = 150; // cursor glow radius
+const CELL = 56;
+const HOTSPOT_STEP = 7 * CELL; // deliberately sparse fact points
+const REVEAL = 120; // "?" reveal distance
+const HOVER = 46; // fact-tooltip trigger distance
+const LENS = 165; // lens / glow radius
+const PUSH = 15; // max outward lens displacement (px)
 const AMBER_FALLBACK = "244, 168, 71";
 
 type Hotspot = { x: number; y: number; fact: string };
@@ -49,7 +54,6 @@ function hash(a: number, b: number): number {
   return Math.floor((h - Math.floor(h)) * 1000);
 }
 
-// "#rrggbb" -> "r, g, b" (for canvas rgba); tolerant of whitespace.
 function hexToRgb(hex: string): string | null {
   const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex.trim());
   if (!m) return null;
@@ -66,10 +70,15 @@ export function GridField() {
     if (!canvasEl || !tipEl) return;
     const context = canvasEl.getContext("2d");
     if (!context) return;
-    // Typed non-null consts so narrowing survives inside the closures below.
     const canvas: HTMLCanvasElement = canvasEl;
     const tip: HTMLDivElement = tipEl;
     const ctx: CanvasRenderingContext2D = context;
+
+    // Offscreen static-grid layer, blitted each frame.
+    const base: HTMLCanvasElement = document.createElement("canvas");
+    const baseCtx = base.getContext("2d");
+    if (!baseCtx) return;
+    const bctx: CanvasRenderingContext2D = baseCtx;
 
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const hover = window.matchMedia("(hover: hover) and (pointer: fine)").matches;
@@ -82,11 +91,9 @@ export function GridField() {
     let mouseY = -9999;
     let lastMove = 0;
     let hotspots: Hotspot[] = [];
-
-    // Colours read from the live theme so the grid, glow and "?" stay visible in
-    // both dark and the light (vintage-paper) theme.
     let accent = AMBER_FALLBACK;
     let isLight = false;
+
     function readColors() {
       const cs = getComputedStyle(document.documentElement);
       accent = hexToRgb(cs.getPropertyValue("--color-accent")) ?? AMBER_FALLBACK;
@@ -98,8 +105,6 @@ export function GridField() {
       const start = HOTSPOT_STEP / 2;
       for (let gx = start; gx < w; gx += HOTSPOT_STEP) {
         for (let gy = start; gy < h; gy += HOTSPOT_STEP) {
-          // land each "?" in the CENTRE of a grid cell (not on an intersection),
-          // with a small deterministic jitter across nearby cells.
           const jx = (hash(gx, gy) % 3) - 1;
           const jy = (hash(gx + 17, gy + 31) % 3) - 1;
           const col = Math.round(gx / CELL) + jx;
@@ -112,54 +117,99 @@ export function GridField() {
       }
     }
 
+    // Render the faint static grid + resting dots into the offscreen layer.
+    function drawBase() {
+      base.width = Math.floor(w * dpr);
+      base.height = Math.floor(h * dpr);
+      bctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      bctx.clearRect(0, 0, w, h);
+      const lineA = isLight ? 0.1 : 0.06;
+      const dotA = isLight ? 0.17 : 0.11;
+      bctx.strokeStyle = `rgba(${accent}, ${lineA})`;
+      bctx.lineWidth = 1;
+      bctx.beginPath();
+      for (let x = 0; x <= w; x += CELL) {
+        bctx.moveTo(x + 0.5, 0);
+        bctx.lineTo(x + 0.5, h);
+      }
+      for (let y = 0; y <= h; y += CELL) {
+        bctx.moveTo(0, y + 0.5);
+        bctx.lineTo(w, y + 0.5);
+      }
+      bctx.stroke();
+      bctx.fillStyle = `rgba(${accent}, ${dotA})`;
+      for (let x = 0; x <= w; x += CELL) {
+        for (let y = 0; y <= h; y += CELL) {
+          bctx.fillRect(x - 0.9, y - 0.9, 1.8, 1.8);
+        }
+      }
+    }
+
     function resize() {
       dpr = Math.min(window.devicePixelRatio || 1, 2);
       w = canvas.clientWidth;
       h = canvas.clientHeight;
       canvas.width = Math.floor(w * dpr);
       canvas.height = Math.floor(h * dpr);
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.font = "600 16px ui-monospace, monospace";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
+      drawBase();
       seedHotspots();
       drawFrame();
     }
 
     function drawFrame() {
-      ctx.clearRect(0, 0, w, h);
-      const gridA = isLight ? 0.1 : 0.05;
-      const glowA = isLight ? 0.12 : 0.09;
-      const markA = isLight ? 0.95 : 0.72;
+      // blit static base (identity transform), then draw dynamic overlay scaled
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(base, 0, 0);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-      // faint base grid
-      ctx.strokeStyle = `rgba(${accent}, ${gridA})`;
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      for (let x = 0; x <= w; x += CELL) {
-        ctx.moveTo(x + 0.5, 0);
-        ctx.lineTo(x + 0.5, h);
-      }
-      for (let y = 0; y <= h; y += CELL) {
-        ctx.moveTo(0, y + 0.5);
-        ctx.lineTo(w, y + 0.5);
-      }
-      ctx.stroke();
-
-      // soft glow following the cursor
       if (mouseX > -9000) {
-        const g = ctx.createRadialGradient(mouseX, mouseY, 0, mouseX, mouseY, GLOW);
-        g.addColorStop(0, `rgba(${accent}, ${glowA})`);
+        // soft glow
+        const g = ctx.createRadialGradient(mouseX, mouseY, 0, mouseX, mouseY, LENS);
+        g.addColorStop(0, `rgba(${accent}, ${isLight ? 0.12 : 0.09})`);
         g.addColorStop(1, `rgba(${accent}, 0)`);
         ctx.fillStyle = g;
-        ctx.fillRect(mouseX - GLOW, mouseY - GLOW, GLOW * 2, GLOW * 2);
+        ctx.fillRect(mouseX - LENS, mouseY - LENS, LENS * 2, LENS * 2);
+
+        // lens: grid intersections bloom + push outward near the cursor
+        const c0 = Math.floor((mouseX - LENS) / CELL);
+        const c1 = Math.ceil((mouseX + LENS) / CELL);
+        const r0 = Math.floor((mouseY - LENS) / CELL);
+        const r1 = Math.ceil((mouseY + LENS) / CELL);
+        const peak = isLight ? 0.95 : 0.8;
+        for (let col = c0; col <= c1; col++) {
+          for (let row = r0; row <= r1; row++) {
+            const ix = col * CELL;
+            const iy = row * CELL;
+            const dx = ix - mouseX;
+            const dy = iy - mouseY;
+            const d = Math.hypot(dx, dy);
+            if (d >= LENS) continue;
+            const t = 1 - d / LENS; // closeness 0..1
+            const ease = t * t; // concentrated push
+            const push = ease * PUSH;
+            const nx = d > 0.001 ? dx / d : 0;
+            const ny = d > 0.001 ? dy / d : 0;
+            const px = ix + nx * push;
+            const py = iy + ny * push;
+            const rad = 1 + t * 4; // grows toward the cursor
+            const alpha = Math.pow(t, 1.15) * peak; // broader glow of lit dots
+            ctx.fillStyle = `rgba(${accent}, ${alpha})`;
+            ctx.beginPath();
+            ctx.arc(px, py, rad, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
       }
 
-      // "?" only at hotspots (cell-centred), revealed as the glow approaches
+      // "?" only at hotspots (cell-centred), revealed as the lens approaches
       for (const hs of hotspots) {
         const d = Math.hypot(hs.x - mouseX, hs.y - mouseY);
         if (d < REVEAL) {
-          const a = (1 - d / REVEAL) * markA;
+          const a = (1 - d / REVEAL) * (isLight ? 0.95 : 0.72);
           ctx.fillStyle = `rgba(${accent}, ${a})`;
           ctx.fillText("?", hs.x, hs.y);
         }
@@ -168,8 +218,7 @@ export function GridField() {
 
     function loop() {
       drawFrame();
-      // keep animating briefly after the last movement, then park
-      if (performance.now() - lastMove < 140) {
+      if (performance.now() - lastMove < 160) {
         raf = requestAnimationFrame(loop);
       } else {
         raf = 0;
@@ -186,7 +235,6 @@ export function GridField() {
       lastMove = performance.now();
       wake();
 
-      // nearest hotspot within HOVER → show its fact after a short dwell
       let near: Hotspot | null = null;
       let best = HOVER;
       for (const hs of hotspots) {
@@ -227,9 +275,9 @@ export function GridField() {
     resize();
     window.addEventListener("resize", resize);
 
-    // Re-read theme colours + redraw when the theme toggles.
     const themeObserver = new MutationObserver(() => {
       readColors();
+      drawBase();
       drawFrame();
     });
     themeObserver.observe(document.documentElement, {
