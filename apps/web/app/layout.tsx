@@ -26,7 +26,7 @@ const jetbrainsMono = JetBrains_Mono({
   display: "swap",
 });
 
-const SITE_URL = "https://project-mri.dev";
+const SITE_URL = "https://mri.shypot.com";
 const DESCRIPTION =
   "MRI decomposes AI-authored vs human-authored risk from real session logs, tracks decisions to measured outcomes, and stays MIT-licensed and self-hostable forever.";
 

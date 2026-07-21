@@ -9,7 +9,7 @@ account registration. Just `pip install project-mri` and you're done.
 ## Quick install (one-liner)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/veter391/project-mri/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/project-mri/project-mri/main/scripts/install.sh | bash
 ```
 
 This will:
@@ -19,12 +19,12 @@ This will:
 
 To install for the current user only (no sudo):
 ```bash
-curl -fsSL https://raw.githubusercontent.com/veter391/project-mri/main/scripts/install.sh | bash -s -- --user
+curl -fsSL https://raw.githubusercontent.com/project-mri/project-mri/main/scripts/install.sh | bash -s -- --user
 ```
 
 To install system-wide (with sudo):
 ```bash
-curl -fsSL https://raw.githubusercontent.com/veter391/project-mri/main/scripts/install.sh | bash -s -- --system
+curl -fsSL https://raw.githubusercontent.com/project-mri/project-mri/main/scripts/install.sh | bash -s -- --system
 ```
 
 ---
@@ -50,7 +50,7 @@ No image is published yet — build it from source. The image builds the dashboa
 itself (Node stage), so it never depends on your working tree:
 
 ```bash
-git clone https://github.com/veter391/project-mri.git
+git clone https://github.com/project-mri/project-mri.git
 cd project-mri
 docker build -t project-mri .
 docker run -d \
@@ -69,7 +69,7 @@ Dashboard will be at `http://localhost:7331/dashboard/`.
 Requires Python 3.10+ and, for the web apps, Node >= 22.13 (pnpm 11 needs it).
 
 ```bash
-git clone https://github.com/veter391/project-mri.git
+git clone https://github.com/project-mri/project-mri.git
 cd project-mri
 ```
 

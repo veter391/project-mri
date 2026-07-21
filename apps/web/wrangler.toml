@@ -39,11 +39,9 @@ not_found_handling = "404-page"
 [env.production]
 name = "project-mri-site"
 workers_dev = true
-# Custom domain once DNS is on Cloudflare:
-# routes = [
-#   { pattern = "project-mri.dev", custom_domain = true },
-#   { pattern = "www.project-mri.dev", custom_domain = true },
-# ]
+routes = [
+  { pattern = "mri.shypot.com", custom_domain = true },
+]
 
 [env.production.assets]
 directory = "./out"

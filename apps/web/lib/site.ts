@@ -5,7 +5,7 @@
 export const SITE = {
   name: "MRI",
   pkg: "project-mri",
-  url: "https://project-mri.dev",
+  url: "https://mri.shypot.com",
   github: "https://github.com/project-mri/project-mri",
   license: "https://github.com/project-mri/project-mri/blob/main/LICENSE",
   version: "0.3.0",
