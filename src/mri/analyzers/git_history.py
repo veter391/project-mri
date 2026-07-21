@@ -18,6 +18,7 @@ from typing import Any
 from git.exc import GitCommandError
 
 from mri.analyzers.base import BaseAnalyzer, ScanContext
+from mri.timeparse import parse_iso8601
 
 logger = logging.getLogger("mri.analyzers.git_history")
 
@@ -262,7 +263,7 @@ class GitHistoryAnalyzer(BaseAnalyzer):
             email, name = fields[1], fields[2]
             if len(fields) > 3:
                 try:
-                    commit_dates.append(datetime.fromisoformat(fields[3]))
+                    commit_dates.append(parse_iso8601(fields[3]))
                 except ValueError:
                     pass
             author = (email or name or "unknown").lower()

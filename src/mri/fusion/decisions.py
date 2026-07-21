@@ -30,6 +30,7 @@ import aiosqlite
 
 from mri.db import fusion_repository as repo
 from mri.models.fusion import Decision
+from mri.timeparse import parse_iso8601
 from mri.utils import clean_text
 
 logger = logging.getLogger(__name__)
@@ -91,7 +92,7 @@ def _parse_date(raw: str) -> datetime | None:
     if not match:
         return None
     try:
-        return datetime.fromisoformat(match.group(1))
+        return parse_iso8601(match.group(1))
     except ValueError:
         return None
 

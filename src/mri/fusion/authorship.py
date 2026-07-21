@@ -27,6 +27,8 @@ from datetime import datetime
 
 import aiosqlite
 
+from mri.timeparse import parse_iso8601
+
 __all__ = [
     "AuthorshipEvidence",
     "WeightedRisk",
@@ -159,7 +161,7 @@ async def authorship_evidence_for(
                 # NULL when there were only reads; then the strength is genuinely 0.
                 evidence_strength=float(data["strength"]) if data["strength"] is not None else 0.0,
                 last_ai_write=(
-                    datetime.fromisoformat(last_write_raw)
+                    parse_iso8601(last_write_raw)
                     if isinstance(last_write_raw, str)
                     else None
                 ),

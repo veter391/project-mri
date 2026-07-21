@@ -31,6 +31,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from mri.timeparse import parse_iso8601
+
 logger = logging.getLogger(__name__)
 
 SOURCE = "claude_code"
@@ -107,7 +109,7 @@ def _parse_time(raw: Any) -> datetime | None:
     if not isinstance(raw, str):
         return None
     try:
-        return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        return parse_iso8601(raw)
     except ValueError:
         return None
 

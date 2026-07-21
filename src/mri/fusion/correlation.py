@@ -32,6 +32,7 @@ from typing import Any
 import aiosqlite
 
 from mri.db import fusion_repository as repo
+from mri.timeparse import parse_iso8601
 
 logger = logging.getLogger(__name__)
 
@@ -112,7 +113,7 @@ def file_commit_history(
             sha, _, iso = body.partition(_SEP)
             index += 1
             try:
-                when = datetime.fromisoformat(iso)
+                when = parse_iso8601(iso)
             except ValueError:  # pragma: no cover - git always emits a valid %aI
                 when = None
             path = first_file

@@ -32,6 +32,7 @@ import aiosqlite
 
 from mri.db import fusion_repository as repo
 from mri.models.fusion import Consequence, Decision, Session
+from mri.timeparse import parse_iso8601
 from mri.utils import utc_iso
 
 __all__ = [
@@ -89,7 +90,7 @@ async def _score_before(
         (project_id, metric, _utc_iso(moment)),
     )
     row = await cursor.fetchone()
-    return _ScorePoint(float(row[0]), datetime.fromisoformat(row[1])) if row else None
+    return _ScorePoint(float(row[0]), parse_iso8601(row[1])) if row else None
 
 
 async def _score_within(
@@ -109,7 +110,7 @@ async def _score_within(
         (project_id, metric, _utc_iso(start), _utc_iso(end)),
     )
     row = await cursor.fetchone()
-    return _ScorePoint(float(row[0]), datetime.fromisoformat(row[1])) if row else None
+    return _ScorePoint(float(row[0]), parse_iso8601(row[1])) if row else None
 
 
 async def _confounders_in_window(
