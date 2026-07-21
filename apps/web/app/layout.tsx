@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Space_Grotesk, Outfit, JetBrains_Mono } from "next/font/google";
 import { Nav } from "@/components/nav";
 import { Footer } from "@/components/footer";
+import { Crt } from "@/components/crt";
 import "./globals.css";
 
 // Self-hosted at build time by next/font — no runtime CDN request, CSP-clean.
@@ -105,6 +106,7 @@ export default function RootLayout({
         <Nav />
         <main id="main-content">{children}</main>
         <Footer />
+        <Crt />
       </body>
     </html>
   );
