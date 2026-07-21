@@ -140,7 +140,10 @@ async def explain_file(
 
     decisions = await repo.decisions_affecting_file(conn, file_path, project_id=project_id)
     if decisions:
-        names = [d.summary for d in decisions[:3]]
+        # clean_text the summaries: a commit subject / ADR title can carry an
+        # ANSI escape or bidi override, and this prose is printed to a terminal
+        # (fusion CLI) as well as a browser, mirroring the shown_path treatment.
+        names = [clean_text(d.summary) for d in decisions[:3]]
         more = "" if len(decisions) <= 3 else f", and {len(decisions) - 3} more"
         factors.append(Factor(
             "decisions",

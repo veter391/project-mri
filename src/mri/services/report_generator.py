@@ -4,7 +4,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
-from jinja2 import Environment, FileSystemLoader, select_autoescape
+from jinja2 import Environment, FileSystemLoader
 
 from mri.models.scan import Report
 
@@ -21,8 +21,14 @@ def _build_env() -> Environment:
     discarding it threw away the very thing that makes rendering fast.
     """
     return Environment(
+        # Force autoescape: select_autoescape keys on the filename extension, and
+        # the template is "report.html.j2" — which ends in .j2, not .html, so the
+        # extension heuristic left escaping OFF and every {{ }} rendered raw HTML.
+        # This env renders only that one HTML report, so escaping everything is
+        # correct and closes a stored-XSS path (a repo filename or commit subject
+        # reaching the report unescaped).
         loader=FileSystemLoader(str(TEMPLATES_DIR)),
-        autoescape=select_autoescape(["html", "xml"]),
+        autoescape=True,
         trim_blocks=True,
         lstrip_blocks=True,
     )
