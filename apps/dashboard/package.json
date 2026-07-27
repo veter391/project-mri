@@ -12,16 +12,16 @@
   },
   "dependencies": {
     "next": "15.5.20",
-    "react": "19.2.7",
-    "react-dom": "19.2.7"
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "4.3.2",
+    "@tailwindcss/postcss": "4.3.3",
     "@types/node": "22.20.1",
     "@types/react": "19.2.17",
     "@types/react-dom": "19.2.3",
     "openapi-typescript": "7.13.0",
-    "tailwindcss": "4.3.2",
+    "tailwindcss": "4.3.3",
     "typescript": "5.9.2"
   }
 }
